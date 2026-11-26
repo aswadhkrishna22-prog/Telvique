@@ -14,6 +14,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.provider.BlockedNumberContract
 import android.provider.CallLog
 import android.provider.ContactsContract
 import android.telecom.PhoneAccountHandle
@@ -318,6 +319,49 @@ class PhoneRepository(private val context: Context) {
         }
 
         return false
+    }
+
+    fun canUseSystemBlockedNumbers(): Boolean = runCatching {
+        BlockedNumberContract.canCurrentUserBlockNumbers(context)
+    }.getOrDefault(false)
+
+    suspend fun loadSystemBlockedNumbers(): Set<String> = withContext(Dispatchers.IO) {
+        if (!canUseSystemBlockedNumbers()) return@withContext emptySet()
+        val blocked = mutableSetOf<String>()
+        runCatching {
+            resolver.query(
+                BlockedNumberContract.BlockedNumbers.CONTENT_URI,
+                arrayOf(BlockedNumberContract.BlockedNumbers.COLUMN_ORIGINAL_NUMBER),
+                null,
+                null,
+                null
+            )?.use { cursor ->
+                val idx = cursor.getColumnIndex(BlockedNumberContract.BlockedNumbers.COLUMN_ORIGINAL_NUMBER)
+                if (idx >= 0) {
+                    while (cursor.moveToNext()) {
+                        cursor.getString(idx)?.takeIf { it.isNotBlank() }?.let { blocked.add(it) }
+                    }
+                }
+            }
+        }
+        blocked
+    }
+
+    suspend fun addSystemBlockedNumber(number: String) = withContext(Dispatchers.IO) {
+        if (!canUseSystemBlockedNumbers() || number.isBlank()) return@withContext
+        runCatching {
+            val values = ContentValues().apply {
+                put(BlockedNumberContract.BlockedNumbers.COLUMN_ORIGINAL_NUMBER, number.trim())
+            }
+            resolver.insert(BlockedNumberContract.BlockedNumbers.CONTENT_URI, values)
+        }
+    }
+
+    suspend fun removeSystemBlockedNumber(number: String) = withContext(Dispatchers.IO) {
+        if (!canUseSystemBlockedNumbers() || number.isBlank()) return@withContext
+        runCatching {
+            BlockedNumberContract.unblock(context, number.trim())
+        }
     }
 
     private class MutableContactBuilder(

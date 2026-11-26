@@ -12,6 +12,7 @@ import android.telecom.CallAudioState
 import android.telecom.CallEndpoint
 import android.telecom.CallEndpointException
 import android.telecom.Connection
+import android.telecom.DisconnectCause
 import android.telecom.VideoProfile
 import androidx.annotation.RequiresApi
 import com.telvique.phone.data.PhoneRepository
@@ -36,6 +37,14 @@ enum class CallPhase {
     DISCONNECTED
 }
 
+data class ConferenceParticipant(
+    val id: String,
+    val displayName: String,
+    val number: String,
+    val canDisconnect: Boolean,
+    val canSplit: Boolean,
+)
+
 data class CallUiItem(
     val id: String,
     val number: String,
@@ -52,6 +61,7 @@ data class CallUiItem(
     val networkName: String? = null,
     val isNetworkVerified: Boolean = false,
     val isPotentialSpam: Boolean = false,
+    val participants: List<ConferenceParticipant> = emptyList(),
 )
 
 data class CallAudioUiState(
@@ -87,13 +97,24 @@ object CallManager {
     private val callIdsByInstance = mutableMapOf<Call, String>()
     private val resolvedContacts = mutableMapOf<String, Pair<String?, String?>>()
     private val callbacksByCall = mutableMapOf<Call, Call.Callback>()
+    private val childCallsById = mutableMapOf<String, Call>()
     private val cnapNameCache = mutableMapOf<String, String>()
     private var nextCallId = 1
     private val connectedVibratedCallIds = mutableSetOf<String>()
+    private val ringingCallIds = mutableSetOf<String>()
+    private val wasEverActiveCallIds = mutableSetOf<String>()
+    private val locallyRejectedCallIds = mutableSetOf<String>()
     private var availableEndpoints: List<CallEndpoint> = emptyList()
 
     private val _uiState = MutableStateFlow(TelecomUiState())
     val uiState: StateFlow<TelecomUiState> = _uiState.asStateFlow()
+
+    private val _missedCallCount = MutableStateFlow(0)
+    val missedCallCount: StateFlow<Int> = _missedCallCount.asStateFlow()
+
+    fun clearMissedCallCount() {
+        _missedCallCount.value = 0
+    }
 
     fun lookupCachedCnapName(number: String): String? {
         val tail = com.telvique.phone.data.PhoneFormatUtils.comparableTail(number)
@@ -121,13 +142,28 @@ object CallManager {
         activeCalls[id] = call
         callIdsByInstance[call] = id
 
+        val initialState = getCallState(call)
+        if (initialState == Call.STATE_RINGING) ringingCallIds.add(id)
+        if (initialState == Call.STATE_ACTIVE) wasEverActiveCallIds.add(id)
+
         val callback = object : Call.Callback() {
             override fun onStateChanged(call: Call, state: Int) {
-                if (state == Call.STATE_ACTIVE && connectedVibratedCallIds.add(id)) {
-                    vibrateIfEnabled(context)
+                if (state == Call.STATE_RINGING) ringingCallIds.add(id)
+                if (state == Call.STATE_ACTIVE) {
+                    wasEverActiveCallIds.add(id)
+                    if (connectedVibratedCallIds.add(id)) {
+                        vibrateIfEnabled(context)
+                    }
+                }
+                if (state == Call.STATE_DISCONNECTED) {
+                    handlePotentialMissedCall(context, id, call)
                 }
                 refreshState(context)
                 serviceRef?.onCallsUpdated()
+            }
+
+            override fun onChildrenChanged(call: Call, children: MutableList<Call>) {
+                refreshState(context)
             }
 
             override fun onDetailsChanged(call: Call, details: Call.Details) {
@@ -164,8 +200,14 @@ object CallManager {
         val id = callIdsByInstance.remove(call)
         callbacksByCall.remove(call)?.let { call.unregisterCallback(it) }
         if (id != null) {
+            if (getCallState(call) == Call.STATE_DISCONNECTED) {
+                handlePotentialMissedCall(context, id, call)
+            }
             activeCalls.remove(id)
             connectedVibratedCallIds.remove(id)
+            ringingCallIds.remove(id)
+            wasEverActiveCallIds.remove(id)
+            locallyRejectedCallIds.remove(id)
         }
         refreshState(context)
         serviceRef?.onCallsUpdated()
@@ -245,14 +287,42 @@ object CallManager {
         call.answer(VideoProfile.STATE_AUDIO_ONLY)
     }
 
+    fun answerAndHoldOthers(callId: String? = null) {
+        val ringing = findCall(callId) ?: findCallByPhase(CallPhase.RINGING) ?: return
+        activeCalls.values
+            .filter { it !== ringing && getCallState(it) == Call.STATE_ACTIVE }
+            .forEach { it.hold() }
+        ringing.answer(VideoProfile.STATE_AUDIO_ONLY)
+    }
+
+    fun answerAndEndOthers(callId: String? = null) {
+        val ringing = findCall(callId) ?: findCallByPhase(CallPhase.RINGING) ?: return
+        activeCalls.values
+            .filter { it !== ringing && getCallState(it) != Call.STATE_DISCONNECTED }
+            .forEach { it.disconnect() }
+        ringing.answer(VideoProfile.STATE_AUDIO_ONLY)
+    }
+
     fun decline(callId: String? = null) {
-        val call = findCall(callId) ?: findCallByPhase(CallPhase.RINGING) ?: return
+        val targetId = callId ?: findCallByPhase(CallPhase.RINGING)?.let { callIdsByInstance[it] }
+        val call = findCall(targetId) ?: findCallByPhase(CallPhase.RINGING) ?: return
+        if (targetId != null) locallyRejectedCallIds.add(targetId)
         call.reject(false, null)
     }
 
     fun rejectWithMessage(message: String, callId: String? = null) {
-        val call = findCall(callId) ?: findCallByPhase(CallPhase.RINGING) ?: return
+        val targetId = callId ?: findCallByPhase(CallPhase.RINGING)?.let { callIdsByInstance[it] }
+        val call = findCall(targetId) ?: findCallByPhase(CallPhase.RINGING) ?: return
+        if (targetId != null) locallyRejectedCallIds.add(targetId)
         call.reject(true, message)
+    }
+
+    fun splitParticipant(participantId: String) {
+        childCallsById[participantId]?.splitFromConference()
+    }
+
+    fun disconnectParticipant(participantId: String) {
+        childCallsById[participantId]?.disconnect()
     }
 
     fun disconnect(callId: String? = null) {
@@ -378,15 +448,48 @@ object CallManager {
         return activeCalls[matchId]
     }
 
+    private fun handlePotentialMissedCall(context: Context, id: String, call: Call) {
+        if (!ringingCallIds.remove(id)) return
+        val wasActive = wasEverActiveCallIds.contains(id)
+        val locallyRejected = locallyRejectedCallIds.contains(id)
+        val causeCode = call.details.disconnectCause?.code
+        val isMissed = !wasActive && !locallyRejected &&
+            (causeCode == DisconnectCause.MISSED || causeCode == DisconnectCause.CANCELED || causeCode == null)
+        if (isMissed) {
+            val number = extractNumber(call)
+            val resolvedName = resolvedContacts[number]?.first?.takeIf { it.isNotBlank() }
+            val callerName = call.details.callerDisplayName?.takeIf { it.isNotBlank() }
+            val display = resolvedName ?: callerName ?: number
+            _missedCallCount.value = _missedCallCount.value + 1
+            CallNotificationHelper.showMissedCall(context, display, number)
+        }
+    }
+
     private fun refreshState(context: Context) {
         val repo = PhoneRepository(context.applicationContext)
         val simLabels = repo.getSimAccounts().associate { it.handle.id to it.label }
+        childCallsById.clear()
 
         val items = activeCalls.entries.map { (id, call) ->
             val details = call.details
             val number = extractNumber(call)
             val resolved = resolvedContacts[number]
             val isConference = details.hasProperty(Call.Details.PROPERTY_CONFERENCE)
+            val participants = call.children.mapIndexed { idx, child ->
+                val childNum = extractNumber(child)
+                val childResolved = resolvedContacts[childNum]?.first?.takeIf { it.isNotBlank() }
+                val childCnap = child.details.callerDisplayName?.takeIf { it.isNotBlank() }
+                val childDisplay = childResolved ?: childCnap ?: childNum.ifBlank { "Participant ${idx + 1}" }
+                val childKey = "${id}_child_${idx}"
+                childCallsById[childKey] = child
+                ConferenceParticipant(
+                    id = childKey,
+                    displayName = childDisplay,
+                    number = childNum,
+                    canDisconnect = child.details.can(Call.Details.CAPABILITY_DISCONNECT_FROM_CONFERENCE),
+                    canSplit = child.details.can(Call.Details.CAPABILITY_SEPARATE_FROM_CONFERENCE),
+                )
+            }
             val resolvedName = resolved?.first?.takeIf { it.isNotBlank() }
             val contactName = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 details.contactDisplayName?.takeIf { it.isNotBlank() }
@@ -413,6 +516,7 @@ object CallManager {
 
             val networkName = if (resolvedName == null && contactName == null) callerName else null
             val displayName = when {
+                isConference && participants.isNotEmpty() -> "Conference (${participants.size})"
                 isConference -> "Conference Call"
                 resolvedName != null -> resolvedName
                 contactName != null -> contactName
@@ -448,6 +552,7 @@ object CallManager {
                 networkName = networkName,
                 isNetworkVerified = isNetworkVerified,
                 isPotentialSpam = isPotentialSpam,
+                participants = participants,
             )
         }
 

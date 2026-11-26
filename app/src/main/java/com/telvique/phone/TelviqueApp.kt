@@ -43,7 +43,17 @@ class TelviqueApp : Application() {
             lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
         }
 
+        val missedChannel = NotificationChannel(
+            CallNotificationHelper.CHANNEL_MISSED,
+            getString(R.string.channel_missed_call),
+            NotificationManager.IMPORTANCE_DEFAULT
+        ).apply {
+            description = "Missed phone call alerts"
+            lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
+        }
+
         manager.createNotificationChannel(incomingChannel)
         manager.createNotificationChannel(ongoingChannel)
+        manager.createNotificationChannel(missedChannel)
     }
 }

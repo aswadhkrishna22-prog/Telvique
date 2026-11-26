@@ -21,6 +21,7 @@ import com.telvique.phone.data.TelviqueSettings
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -87,6 +88,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val roleStatusFlow = MutableStateFlow(RoleStatus())
     private val missingPermissionsFlow = MutableStateFlow<List<String>>(emptyList())
     private val pendingSimChoiceNumber = MutableStateFlow<String?>(null)
+    private val systemBlockedNumbersFlow = MutableStateFlow<Set<String>>(emptySet())
+    private val _navigateToKeypadTrigger = MutableStateFlow(0)
+    val navigateToKeypadTrigger: StateFlow<Int> = _navigateToKeypadTrigger.asStateFlow()
+    private val _navigateToRecentsTrigger = MutableStateFlow(0)
+    val navigateToRecentsTrigger: StateFlow<Int> = _navigateToRecentsTrigger.asStateFlow()
 
     private data class CoreListsState(
         val dialerInput: String,
@@ -127,13 +133,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val uiState: StateFlow<MainUiState> = combine(
         coreListsFlow,
         auxiliaryFlow,
-        pendingSimChoiceNumber
-    ) { core, aux, simChoiceNumber ->
+        pendingSimChoiceNumber,
+        systemBlockedNumbersFlow,
+    ) { core, aux, simChoiceNumber, systemBlocked ->
         val t9 = if (core.dialerInput.isBlank()) {
             emptyList()
         } else {
             core.contacts.filter { T9Matcher.matches(it, core.dialerInput) }.take(6)
         }
+        val mergedBlocked = aux.settings.blockedNumbers + systemBlocked
         MainUiState(
             dialerInput = core.dialerInput,
             contacts = core.contacts,
@@ -143,7 +151,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             recentsQuery = core.recentsQuery,
             contactsQuery = aux.contactsQuery,
             simAccounts = aux.simAccounts,
-            settings = aux.settings,
+            settings = aux.settings.copy(blockedNumbers = mergedBlocked),
             isDefaultDialer = aux.roleStatus.isDefaultDialer,
             isCallScreeningAvailable = aux.roleStatus.isCallScreeningAvailable,
             isCallScreeningHeld = aux.roleStatus.isCallScreeningHeld,
@@ -210,6 +218,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             contactsFlow.value = repo.loadContacts()
             callLogsFlow.value = repo.loadCallLogs()
+            systemBlockedNumbersFlow.value = repo.loadSystemBlockedNumbers()
         }
     }
 
@@ -232,6 +241,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setDialerNumber(number: String) {
         dialerInput.value = number
+    }
+
+    fun onDialIntent(number: String) {
+        dialerInput.value = number
+        _navigateToKeypadTrigger.value = _navigateToKeypadTrigger.value + 1
+    }
+
+    fun onOpenRecentsIntent() {
+        _navigateToRecentsTrigger.value = _navigateToRecentsTrigger.value + 1
     }
 
     fun backspaceDialDigit() {
@@ -353,11 +371,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun blockNumber(number: String) {
-        viewModelScope.launch { settingsRepo.blockNumber(number) }
+        viewModelScope.launch {
+            settingsRepo.blockNumber(number)
+            repo.addSystemBlockedNumber(number)
+            systemBlockedNumbersFlow.value = repo.loadSystemBlockedNumbers()
+        }
     }
 
     fun unblockNumber(number: String) {
-        viewModelScope.launch { settingsRepo.unblockNumber(number) }
+        viewModelScope.launch {
+            settingsRepo.unblockNumber(number)
+            repo.removeSystemBlockedNumber(number)
+            systemBlockedNumbersFlow.value = repo.loadSystemBlockedNumbers()
+        }
     }
 
     fun updateQuickResponse(index: Int, text: String) {

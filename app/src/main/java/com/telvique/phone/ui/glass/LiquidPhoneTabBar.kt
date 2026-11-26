@@ -27,10 +27,12 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
@@ -92,6 +94,7 @@ data class LiquidPhoneTabItem(
     val label: String,
     val icon: ImageVector,
     val activeIcon: ImageVector = icon,
+    val badgeCount: Int = 0,
 )
 
 private val LensShape = CircleShape
@@ -524,12 +527,35 @@ private fun PhoneNavigationGlyphs(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.Center,
                 ) {
-                    Icon(
-                        imageVector = if (isSelected) item.activeIcon else item.icon,
-                        contentDescription = null,
-                        tint = tint,
-                        modifier = Modifier.size(22.dp),
-                    )
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = if (isSelected) item.activeIcon else item.icon,
+                            contentDescription = null,
+                            tint = tint,
+                            modifier = Modifier.size(22.dp),
+                        )
+                        if (item.badgeCount > 0 && !captured) {
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .offset(x = 7.dp, y = (-4).dp)
+                                    .defaultMinSize(minWidth = 16.dp)
+                                    .height(16.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFFFF3B30), CircleShape)
+                                    .padding(horizontal = 4.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(
+                                    text = if (item.badgeCount > 9) "9+" else item.badgeCount.toString(),
+                                    color = Color.White,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                )
+                            }
+                        }
+                    }
                     if (item.label.isNotBlank()) {
                         AnimatedVisibility(
                             visible = isSelected,

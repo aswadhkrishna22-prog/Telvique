@@ -64,5 +64,9 @@ class PhoneModelsTest {
         assertEquals(2, grouped[0].count)
         assertEquals(listOf(1L, 2L), grouped[0].entryIds)
         assertEquals(1, grouped[1].count)
+    @Test
+    fun normalizeDialInput_preservesUssdCodes() {
+        assertEquals("*#06#", PhoneFormatUtils.normalizeDialInput("USSD: *#06#"))
+        assertEquals("+919876543210", PhoneFormatUtils.normalizeDialInput("+91 98765-43210"))
     }
 }

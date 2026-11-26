@@ -3,6 +3,7 @@ package com.telvique.phone.telecom
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import com.telvique.phone.data.PhoneRepository
 import com.telvique.phone.ui.call.CallActivity
 
 class CallActionReceiver : BroadcastReceiver() {
@@ -21,6 +22,14 @@ class CallActionReceiver : BroadcastReceiver() {
             }
             ACTION_DECLINE -> CallManager.decline(callId)
             ACTION_HANGUP -> CallManager.disconnect(callId)
+            ACTION_CALL_BACK -> {
+                val number = intent.getStringExtra(EXTRA_NUMBER).orEmpty()
+                CallNotificationHelper.cancelMissedCalls(context)
+                CallManager.clearMissedCallCount()
+                if (number.isNotBlank()) {
+                    PhoneRepository(context.applicationContext).placeCall(number, null)
+                }
+            }
         }
     }
 
@@ -28,6 +37,8 @@ class CallActionReceiver : BroadcastReceiver() {
         const val ACTION_ANSWER = "com.telvique.phone.ACTION_ANSWER_CALL"
         const val ACTION_DECLINE = "com.telvique.phone.ACTION_DECLINE_CALL"
         const val ACTION_HANGUP = "com.telvique.phone.ACTION_HANGUP_CALL"
+        const val ACTION_CALL_BACK = "com.telvique.phone.ACTION_CALL_BACK"
         const val EXTRA_CALL_ID = "extra_call_id"
+        const val EXTRA_NUMBER = "extra_number"
     }
 }

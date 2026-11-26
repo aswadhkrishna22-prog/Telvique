@@ -1,6 +1,7 @@
 package com.telvique.phone.data
 
 import android.telecom.PhoneAccountHandle
+import android.telephony.PhoneNumberUtils
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -49,14 +50,15 @@ data class CallLogItem(
 data class GroupedCallLogItem(
     val primary: CallLogItem,
     val count: Int,
-    val entryIds: List<Long>
+    val entryIds: List<Long>,
+    val entries: List<CallLogItem> = listOf(primary)
 )
 
 fun groupConsecutiveCallLogs(logs: List<CallLogItem>): List<GroupedCallLogItem> {
     if (logs.isEmpty()) return emptyList()
     val result = mutableListOf<GroupedCallLogItem>()
     var currentHead = logs.first()
-    val currentIds = mutableListOf(currentHead.id)
+    val currentEntries = mutableListOf(currentHead)
 
     fun sameBucket(a: CallLogItem, b: CallLogItem): Boolean {
         val aMissed = a.type == CallLogType.MISSED || a.type == CallLogType.REJECTED
@@ -77,15 +79,29 @@ fun groupConsecutiveCallLogs(logs: List<CallLogItem>): List<GroupedCallLogItem> 
     for (i in 1 until logs.size) {
         val item = logs[i]
         if (sameBucket(currentHead, item)) {
-            currentIds.add(item.id)
+            currentEntries.add(item)
         } else {
-            result.add(GroupedCallLogItem(currentHead, currentIds.size, currentIds.toList()))
+            result.add(
+                GroupedCallLogItem(
+                    primary = currentHead,
+                    count = currentEntries.size,
+                    entryIds = currentEntries.map { it.id },
+                    entries = currentEntries.toList()
+                )
+            )
             currentHead = item
-            currentIds.clear()
-            currentIds.add(item.id)
+            currentEntries.clear()
+            currentEntries.add(item)
         }
     }
-    result.add(GroupedCallLogItem(currentHead, currentIds.size, currentIds.toList()))
+    result.add(
+        GroupedCallLogItem(
+            primary = currentHead,
+            count = currentEntries.size,
+            entryIds = currentEntries.map { it.id },
+            entries = currentEntries.toList()
+        )
+    )
     return result
 }
 
@@ -111,6 +127,18 @@ object PhoneFormatUtils {
 
     fun normalizeDigits(input: String): String =
         input.filter { it.isDigit() || it == '+' }
+
+    fun normalizeDialInput(input: String): String =
+        input.filter { it.isDigit() || it == '+' || it == '*' || it == '#' || it == ',' || it == ';' }
+
+    fun formatDisplayNumber(number: String): String {
+        val trimmed = number.trim()
+        if (trimmed.isEmpty() || trimmed.contains('*') || trimmed.contains('#')) return trimmed
+        val country = Locale.getDefault().country.ifBlank { "IN" }
+        return runCatching {
+            PhoneNumberUtils.formatNumber(trimmed, country)
+        }.getOrNull()?.takeIf { it.isNotBlank() } ?: trimmed
+    }
 
     fun comparableTail(input: String): String {
         val digits = input.filter { it.isDigit() }

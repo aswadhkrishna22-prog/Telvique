@@ -6,6 +6,8 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.ContactsContract
 import android.telecom.CallAudioState
+import android.telecom.TelecomManager
+import android.view.KeyEvent
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -39,10 +41,13 @@ import androidx.compose.material.icons.rounded.AddIcCall
 import androidx.compose.material.icons.rounded.Block
 import androidx.compose.material.icons.rounded.BluetoothAudio
 import androidx.compose.material.icons.rounded.CallMerge
+import androidx.compose.material.icons.rounded.CallSplit
+import androidx.compose.material.icons.rounded.Group
 import androidx.compose.material.icons.rounded.Headset
 import androidx.compose.material.icons.rounded.PhoneInTalk
 import androidx.compose.material.icons.rounded.SwapCalls
 import androidx.compose.material.icons.rounded.VerifiedUser
+import androidx.compose.material.icons.rounded.VolumeOff
 import androidx.compose.material.icons.rounded.WarningAmber
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -145,7 +150,14 @@ class CallActivity : ComponentActivity() {
                     telecomState = telecomState,
                     quickResponses = settings.quickResponses,
                     onAnswer = { CallManager.answer(it) },
+                    onAnswerAndHoldOthers = { CallManager.answerAndHoldOthers(it) },
+                    onAnswerAndEndOthers = { CallManager.answerAndEndOthers(it) },
                     onDecline = { CallManager.decline(it) },
+                    onSilenceRinger = {
+                        runCatching {
+                            getSystemService(TelecomManager::class.java)?.silenceRinger()
+                        }
+                    },
                     onBlockAndDecline = { number, id ->
                         lifecycleScope.launch {
                             if (number.isNotBlank()) settingsRepo.blockNumber(number)
@@ -154,6 +166,8 @@ class CallActivity : ComponentActivity() {
                     },
                     onRejectWithSms = { msg, id -> CallManager.rejectWithMessage(msg, id) },
                     onDisconnect = { CallManager.disconnect(it) },
+                    onSplitParticipant = { CallManager.splitParticipant(it) },
+                    onDisconnectParticipant = { CallManager.disconnectParticipant(it) },
                     onToggleMute = { CallManager.toggleMute() },
                     onToggleSpeaker = { CallManager.toggleSpeaker() },
                     onSelectAudioRoute = { CallManager.setAudioRoute(it) },
@@ -178,6 +192,19 @@ class CallActivity : ComponentActivity() {
             }
         }
     }
+
+    override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
+        if (keyCode == KeyEvent.KEYCODE_VOLUME_DOWN || keyCode == KeyEvent.KEYCODE_VOLUME_UP) {
+            val phase = CallManager.uiState.value.primaryCall?.phase
+            if (phase == CallPhase.RINGING) {
+                runCatching {
+                    getSystemService(TelecomManager::class.java)?.silenceRinger()
+                }
+                return true
+            }
+        }
+        return super.onKeyDown(keyCode, event)
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -186,10 +213,15 @@ private fun CallScreen(
     telecomState: TelecomUiState,
     quickResponses: List<String>,
     onAnswer: (String) -> Unit,
+    onAnswerAndHoldOthers: (String) -> Unit,
+    onAnswerAndEndOthers: (String) -> Unit,
     onDecline: (String) -> Unit,
+    onSilenceRinger: () -> Unit,
     onBlockAndDecline: (String, String) -> Unit,
     onRejectWithSms: (String, String) -> Unit,
     onDisconnect: (String) -> Unit,
+    onSplitParticipant: (String) -> Unit,
+    onDisconnectParticipant: (String) -> Unit,
     onToggleMute: () -> Unit,
     onToggleSpeaker: () -> Unit,
     onSelectAudioRoute: (Int) -> Unit,
@@ -208,6 +240,7 @@ private fun CallScreen(
     var dtmfDigits by remember { mutableStateOf("") }
     var showSmsSheet by remember { mutableStateOf(false) }
     var showAudioRouteSheet by remember { mutableStateOf(false) }
+    var showParticipantsSheet by remember { mutableStateOf(false) }
     var elapsedSeconds by remember { mutableLongStateOf(0L) }
     val isDeviceLocked = remember(primary?.id, primary?.phase) {
         context.getSystemService(KeyguardManager::class.java)?.isKeyguardLocked == true
@@ -374,11 +407,46 @@ private fun CallScreen(
                 if (primary.number.isNotBlank() && primary.number != primary.displayName) {
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = primary.number,
+                        text = PhoneFormatUtils.formatDisplayNumber(primary.number),
                         color = Color.White.copy(alpha = 0.78f),
                         fontSize = 15.sp,
                         fontWeight = FontWeight.Medium
                     )
+                }
+
+                if (primary.isConference && primary.participants.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Row(
+                        modifier = Modifier
+                            .backdropLiquidGlass(
+                                backdrop = posterBackdrop,
+                                shape = CircleShape,
+                                isDark = true,
+                                interactive = true,
+                                pressedScale = 1.04f,
+                                hasLens = false,
+                                scrimAlpha = 0.28f,
+                                fallbackTint = Color.White.copy(alpha = 0.16f)
+                            )
+                            .clip(CircleShape)
+                            .clickable { showParticipantsSheet = true }
+                            .padding(horizontal = 14.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Group,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(15.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Manage (${primary.participants.size})",
+                            color = Color.White,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
                 }
 
                 // TRAI CNAP / Carrier ID & Scam Shield Badges
@@ -492,6 +560,38 @@ private fun CallScreen(
                             )
                         }
 
+                        Row(
+                            modifier = Modifier
+                                .backdropLiquidGlass(
+                                    backdrop = posterBackdrop,
+                                    shape = CircleShape,
+                                    isDark = true,
+                                    interactive = true,
+                                    pressedScale = 1.05f,
+                                    hasLens = false,
+                                    scrimAlpha = 0.24f,
+                                    fallbackTint = Color.White.copy(alpha = 0.16f)
+                                )
+                                .clip(CircleShape)
+                                .clickable(onClick = onSilenceRinger)
+                                .padding(horizontal = 16.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.VolumeOff,
+                                contentDescription = "Silence Ringer",
+                                tint = Color.White,
+                                modifier = Modifier.size(15.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Silence",
+                                color = Color.White,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+
                         if (primary.isPotentialSpam && primary.number.isNotBlank()) {
                             Row(
                                 modifier = Modifier
@@ -520,7 +620,34 @@ private fun CallScreen(
 
                     Spacer(modifier = Modifier.height(28.dp))
 
-                    if (isDeviceLocked) {
+                    if (secondary != null) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = 26.dp),
+                            horizontalArrangement = Arrangement.SpaceEvenly,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            AppleSolidCallCircle(
+                                icon = ApplePhoneIcons.PhoneDownFill,
+                                label = "End & Accept",
+                                containerColor = TelviqueColors.CallRed,
+                                onClick = { onAnswerAndEndOthers(primary.id) }
+                            )
+                            AppleSolidCallCircle(
+                                icon = ApplePhoneIcons.PhoneDownFill,
+                                label = "Decline",
+                                containerColor = Color(0xFF3A3A3C),
+                                onClick = { onDecline(primary.id) }
+                            )
+                            AppleSolidCallCircle(
+                                icon = ApplePhoneIcons.PhoneFill,
+                                label = "Hold & Accept",
+                                containerColor = TelviqueColors.CallGreen,
+                                onClick = { onAnswerAndHoldOthers(primary.id) }
+                            )
+                        }
+                    } else if (isDeviceLocked) {
                         AppleSlideToAnswerPill(
                             backdrop = posterBackdrop,
                             onAnswer = { onAnswer(primary.id) },
@@ -559,12 +686,16 @@ private fun CallScreen(
                     ) {
                         AppleInCallDtmfKeypad(
                             digitsEntered = dtmfDigits,
+                            isMuted = telecomState.audioState.isMuted,
+                            isSpeaker = telecomState.audioState.route == CallAudioState.ROUTE_SPEAKER,
                             backdrop = posterBackdrop,
                             onDigitClick = { digit ->
                                 dtmfDigits += digit
                                 onPlayDtmf(digit, primary.id)
                             },
                             onDigitReleased = { onStopDtmf(primary.id) },
+                            onToggleMute = onToggleMute,
+                            onToggleSpeaker = onToggleSpeaker,
                             onHide = { showKeypad = false }
                         )
                     }
@@ -712,6 +843,75 @@ private fun CallScreen(
                     }
                 )
                 Spacer(modifier = Modifier.height(16.dp))
+            }
+        }
+    }
+
+    if (showParticipantsSheet && primary != null && primary.participants.isNotEmpty()) {
+        ModalBottomSheet(
+            onDismissRequest = { showParticipantsSheet = false },
+            containerColor = Color(0xFF1C1C1E)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text(
+                    text = "Conference (${primary.participants.size})",
+                    color = Color.White,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+                primary.participants.forEach { participant ->
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(14.dp),
+                        color = Color(0xFF2C2C2E)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 14.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = participant.displayName,
+                                    color = Color.White,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                if (participant.number.isNotBlank() && participant.number != participant.displayName) {
+                                    Text(
+                                        text = PhoneFormatUtils.formatDisplayNumber(participant.number),
+                                        color = Color.White.copy(alpha = 0.65f),
+                                        fontSize = 13.sp
+                                    )
+                                }
+                            }
+                            if (participant.canSplit) {
+                                TextButton(onClick = {
+                                    onSplitParticipant(participant.id)
+                                    showParticipantsSheet = false
+                                }) {
+                                    Text("Split", color = TelviqueColors.AppleBlueDark, fontWeight = FontWeight.SemiBold)
+                                }
+                            }
+                            if (participant.canDisconnect) {
+                                TextButton(onClick = {
+                                    onDisconnectParticipant(participant.id)
+                                }) {
+                                    Text("End", color = TelviqueColors.CallRed, fontWeight = FontWeight.SemiBold)
+                                }
+                            }
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(18.dp))
             }
         }
     }
@@ -971,9 +1171,13 @@ private fun AppleSolidCallCircle(
 @Composable
 private fun AppleInCallDtmfKeypad(
     digitsEntered: String,
+    isMuted: Boolean,
+    isSpeaker: Boolean,
     backdrop: Backdrop?,
     onDigitClick: (Char) -> Unit,
     onDigitReleased: () -> Unit,
+    onToggleMute: () -> Unit,
+    onToggleSpeaker: () -> Unit,
     onHide: () -> Unit
 ) {
     val rows = listOf(
@@ -1052,9 +1256,61 @@ private fun AppleInCallDtmfKeypad(
                 }
             }
         }
-        Spacer(modifier = Modifier.height(6.dp))
-        TextButton(onClick = onHide) {
-            Text("Hide", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+        Spacer(modifier = Modifier.height(8.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(
+                modifier = Modifier
+                    .clip(CircleShape)
+                    .background(if (isMuted) Color.White else Color.White.copy(alpha = 0.16f), CircleShape)
+                    .clickable(onClick = onToggleMute)
+                    .padding(horizontal = 14.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = if (isMuted) ApplePhoneIcons.MicSlashFill else ApplePhoneIcons.MicFill,
+                    contentDescription = "Mute",
+                    tint = if (isMuted) Color.Black else Color.White,
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = "Mute",
+                    color = if (isMuted) Color.Black else Color.White,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium
+                )
+            }
+
+            TextButton(onClick = onHide) {
+                Text("Hide", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+            }
+
+            Row(
+                modifier = Modifier
+                    .clip(CircleShape)
+                    .background(if (isSpeaker) Color.White else Color.White.copy(alpha = 0.16f), CircleShape)
+                    .clickable(onClick = onToggleSpeaker)
+                    .padding(horizontal = 14.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = ApplePhoneIcons.SpeakerWave3Fill,
+                    contentDescription = "Speaker",
+                    tint = if (isSpeaker) Color.Black else Color.White,
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = "Speaker",
+                    color = if (isSpeaker) Color.Black else Color.White,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium
+                )
+            }
         }
     }
 }

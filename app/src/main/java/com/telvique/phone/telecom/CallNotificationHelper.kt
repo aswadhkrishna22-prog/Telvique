@@ -5,19 +5,25 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.Person
 import androidx.core.content.ContextCompat
+import com.telvique.phone.MainActivity
 import com.telvique.phone.R
+import com.telvique.phone.data.PhoneFormatUtils
 import com.telvique.phone.ui.call.CallActivity
 
 object CallNotificationHelper {
 
     const val CHANNEL_INCOMING = "telvique_incoming_call"
     const val CHANNEL_ONGOING = "telvique_ongoing_call"
+    const val CHANNEL_MISSED = "telvique_missed_call"
+    const val EXTRA_OPEN_RECENTS = "extra_open_recents"
     private const val NOTIFICATION_ID = 4011
+    private const val MISSED_NOTIFICATION_ID = 4012
 
     fun showOrUpdate(context: Context, call: CallUiItem) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
@@ -70,7 +76,11 @@ object CallNotificationHelper {
             NotificationCompat.Builder(context, CHANNEL_INCOMING)
                 .setSmallIcon(R.drawable.ic_launcher_foreground)
                 .setContentTitle(call.displayName)
-                .setContentText(call.number.ifBlank { "Incoming call" })
+                .setContentText(
+                    call.number.takeIf { it.isNotBlank() }?.let {
+                        PhoneFormatUtils.formatDisplayNumber(it)
+                    } ?: "Incoming call"
+                )
                 .setPriority(NotificationCompat.PRIORITY_MAX)
                 .setCategory(NotificationCompat.CATEGORY_CALL)
                 .setOngoing(true)
@@ -131,6 +141,74 @@ object CallNotificationHelper {
         runCatching {
             manager.notify(NOTIFICATION_ID, notification)
         }
+    }
+
+    fun showMissedCall(context: Context, displayName: String, number: String) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            return
+        }
+
+        val openRecentsIntent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            putExtra(EXTRA_OPEN_RECENTS, true)
+        }
+        val openPending = PendingIntent.getActivity(
+            context,
+            200,
+            openRecentsIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val builder = NotificationCompat.Builder(context, CHANNEL_MISSED)
+            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setContentTitle("Missed call")
+            .setContentText(
+                if (displayName.isNotBlank() && displayName != number) {
+                    "$displayName (${PhoneFormatUtils.formatDisplayNumber(number)})"
+                } else {
+                    PhoneFormatUtils.formatDisplayNumber(number).ifBlank { "Unknown Caller" }
+                }
+            )
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setCategory(NotificationCompat.CATEGORY_MISSED_CALL)
+            .setAutoCancel(true)
+            .setContentIntent(openPending)
+
+        if (number.isNotBlank()) {
+            val callBackIntent = Intent(context, CallActionReceiver::class.java).apply {
+                action = CallActionReceiver.ACTION_CALL_BACK
+                putExtra(CallActionReceiver.EXTRA_NUMBER, number)
+            }
+            val callBackPending = PendingIntent.getBroadcast(
+                context,
+                201,
+                callBackIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            builder.addAction(0, "Call Back", callBackPending)
+
+            val smsIntent = Intent(Intent.ACTION_SENDTO, Uri.parse("smsto:${Uri.encode(number)}")).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+            val smsPending = PendingIntent.getActivity(
+                context,
+                202,
+                smsIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            builder.addAction(0, "Message", smsPending)
+        }
+
+        runCatching {
+            NotificationManagerCompat.from(context).notify(MISSED_NOTIFICATION_ID, builder.build())
+        }
+    }
+
+    fun cancelMissedCalls(context: Context) {
+        NotificationManagerCompat.from(context).cancel(MISSED_NOTIFICATION_ID)
     }
 
     fun cancelAll(context: Context) {

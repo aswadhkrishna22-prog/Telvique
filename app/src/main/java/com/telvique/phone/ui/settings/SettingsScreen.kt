@@ -5,6 +5,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
+import android.telecom.TelecomManager
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -300,6 +301,46 @@ fun SettingsScreen(
                                 )
                             }
                         }
+                    }
+
+                    AppleInsetDivider()
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                val callSettingsIntent = Intent(TelecomManager.ACTION_SHOW_CALL_SETTINGS).apply {
+                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                }
+                                val opened = runCatching { context.startActivity(callSettingsIntent) }.isSuccess
+                                if (!opened) {
+                                    val fallbackIntent = Intent(TelecomManager.ACTION_CHANGE_PHONE_ACCOUNTS).apply {
+                                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                    }
+                                    runCatching { context.startActivity(fallbackIntent) }
+                                }
+                            }
+                            .padding(horizontal = 16.dp, vertical = 13.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Carrier Call Settings",
+                                color = palette.label,
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Text(
+                                text = "Call forwarding, waiting, SIM & operator options",
+                                color = palette.secondaryLabel,
+                                fontSize = 13.sp
+                            )
+                        }
+                        Icon(
+                            imageVector = ApplePhoneIcons.ChevronRight,
+                            contentDescription = null,
+                            tint = palette.tertiaryLabel,
+                            modifier = Modifier.size(16.dp)
+                        )
                     }
                 }
             }

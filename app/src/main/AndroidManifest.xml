@@ -95,6 +95,7 @@
                 <action android:name="com.telvique.phone.ACTION_ANSWER_CALL" />
                 <action android:name="com.telvique.phone.ACTION_DECLINE_CALL" />
                 <action android:name="com.telvique.phone.ACTION_HANGUP_CALL" />
+                <action android:name="com.telvique.phone.ACTION_CALL_BACK" />
             </intent-filter>
         </receiver>
     </application>

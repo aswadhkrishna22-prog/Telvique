@@ -36,12 +36,19 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ContentPaste
+import androidx.compose.material.icons.rounded.KeyboardArrowDown
+import androidx.compose.material.icons.rounded.SimCard
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -61,6 +68,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.telvique.phone.data.ContactItem
 import com.telvique.phone.data.PhoneFormatUtils
+import com.telvique.phone.data.SimAccountInfo
 import com.telvique.phone.ui.components.ContactAvatar
 import com.telvique.phone.ui.components.openAddContact
 import com.telvique.phone.ui.glass.LiquidCircularGlassButton
@@ -92,9 +100,12 @@ fun DialerScreen(
     dialpadVibrateEnabled: Boolean,
     speedDial: Map<String, String> = emptyMap(),
     voicemailNumber: String = "*86",
+    simAccounts: List<SimAccountInfo> = emptyList(),
+    preferredSimId: String? = null,
     showTopSettingsButton: Boolean,
     bottomInsetPadding: Dp,
     onOpenSettings: () -> Unit,
+    onSelectPreferredSim: (String?) -> Unit = {},
     onDigitPress: (String) -> Unit,
     onSetNumber: (String) -> Unit,
     onBackspace: () -> Unit,
@@ -145,14 +156,94 @@ fun DialerScreen(
             .padding(horizontal = 24.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // Optional subtle top bar row for Settings button in Unified mode
+        var showSimMenu by remember { mutableStateOf(false) }
+        val activeSimLabel = remember(simAccounts, preferredSimId) {
+            simAccounts.firstOrNull { it.id == preferredSimId }?.label ?: "Ask SIM"
+        }
+
+        // Top row: Dual-SIM switcher pill (when > 1 SIM) + Settings button in Unified mode
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(top = 8.dp),
-            horizontalArrangement = Arrangement.End,
+            horizontalArrangement = if (simAccounts.size > 1) Arrangement.SpaceBetween else Arrangement.End,
             verticalAlignment = Alignment.CenterVertically
         ) {
+            if (simAccounts.size > 1) {
+                Box {
+                    Row(
+                        modifier = Modifier
+                            .clearLiquidGlassPill(
+                                isDark = palette.isDark,
+                                tint = palette.cardSurface
+                            )
+                            .clip(CircleShape)
+                            .clickable { showSimMenu = true }
+                            .padding(horizontal = 12.dp, vertical = 7.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.SimCard,
+                            contentDescription = "Active SIM",
+                            tint = palette.accentBlue,
+                            modifier = Modifier.size(15.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = activeSimLabel,
+                            color = palette.label,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Spacer(modifier = Modifier.width(3.dp))
+                        Icon(
+                            imageVector = Icons.Rounded.KeyboardArrowDown,
+                            contentDescription = null,
+                            tint = palette.secondaryLabel,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+
+                    DropdownMenu(
+                        expanded = showSimMenu,
+                        onDismissRequest = { showSimMenu = false },
+                        containerColor = palette.cardSurface
+                    ) {
+                        DropdownMenuItem(
+                            text = {
+                                Text(
+                                    text = "Ask Every Time",
+                                    color = palette.label,
+                                    fontWeight = if (preferredSimId == null) FontWeight.SemiBold else FontWeight.Normal
+                                )
+                            },
+                            onClick = {
+                                onSelectPreferredSim(null)
+                                showSimMenu = false
+                            }
+                        )
+                        HorizontalDivider(color = palette.separator.copy(alpha = 0.45f))
+                        simAccounts.forEach { sim ->
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        text = sim.label,
+                                        color = palette.label,
+                                        fontWeight = if (preferredSimId == sim.id) FontWeight.SemiBold else FontWeight.Normal
+                                    )
+                                },
+                                onClick = {
+                                    onSelectPreferredSim(sim.id)
+                                    showSimMenu = false
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+
             if (showTopSettingsButton) {
                 LiquidCircularGlassButton(
                     icon = ApplePhoneIcons.GearShapeFill,
@@ -245,20 +336,23 @@ fun DialerScreen(
                 }
 
                 // Centered Apple Phone number display (auto-scaling tabular numerals)
+                val displayFormatted = remember(input) {
+                    PhoneFormatUtils.formatDisplayNumber(input)
+                }
                 val numberFontSize = when {
-                    input.length > 15 -> 24.sp
-                    input.length > 11 -> 30.sp
+                    displayFormatted.length > 16 -> 24.sp
+                    displayFormatted.length > 12 -> 30.sp
                     else -> 36.sp
                 }
                 Text(
-                    text = input,
+                    text = displayFormatted,
                     modifier = Modifier
                         .fillMaxWidth()
                         .combinedClickable(
                             onClick = {},
                             onLongClick = {
                                 val pasted = clipboard.getText()?.text?.toString().orEmpty()
-                                val cleaned = PhoneFormatUtils.normalizeDigits(pasted)
+                                val cleaned = PhoneFormatUtils.normalizeDialInput(pasted)
                                 if (cleaned.isNotBlank()) onSetNumber(cleaned)
                             }
                         )
@@ -373,7 +467,7 @@ fun DialerScreen(
                             .clip(CircleShape)
                             .clickable {
                                 val pasted = clipboard.getText()?.text?.toString().orEmpty()
-                                val cleaned = PhoneFormatUtils.normalizeDigits(pasted)
+                                val cleaned = PhoneFormatUtils.normalizeDialInput(pasted)
                                 if (cleaned.isNotBlank()) onSetNumber(cleaned)
                             },
                         contentAlignment = Alignment.Center

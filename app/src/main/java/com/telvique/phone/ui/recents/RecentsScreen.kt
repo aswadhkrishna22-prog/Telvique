@@ -411,7 +411,7 @@ fun RecentsScreen(
                 }
                 if (activeItem.number.isNotBlank() && activeItem.number != effectiveTitle) {
                     Text(
-                        text = activeItem.number,
+                        text = PhoneFormatUtils.formatDisplayNumber(activeItem.number),
                         color = palette.secondaryLabel,
                         fontSize = 15.sp
                     )
@@ -478,6 +478,71 @@ fun RecentsScreen(
                 }
 
                 Spacer(modifier = Modifier.height(18.dp))
+
+                if (activeGroup.entries.isNotEmpty()) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(palette.tertiaryFill)
+                            .padding(horizontal = 16.dp, vertical = 12.dp)
+                    ) {
+                        Text(
+                            text = if (activeGroup.entries.size == 1) "Call Detail" else "Call History (${activeGroup.entries.size})",
+                            color = palette.secondaryLabel,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        activeGroup.entries.take(8).forEachIndexed { idx, entry ->
+                            val typeLabel = when (entry.type) {
+                                CallLogType.OUTGOING -> "Outgoing Call"
+                                CallLogType.INCOMING -> "Incoming Call"
+                                CallLogType.MISSED -> "Missed Call"
+                                CallLogType.REJECTED -> "Declined Call"
+                                CallLogType.BLOCKED -> "Blocked Call"
+                                CallLogType.VOICEMAIL -> "Voicemail"
+                                CallLogType.UNKNOWN -> "Call"
+                            }
+                            val entryIsMissed = entry.type == CallLogType.MISSED || entry.type == CallLogType.REJECTED
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = PhoneFormatUtils.formatRelativeTime(entry.timestamp),
+                                    color = palette.secondaryLabel,
+                                    fontSize = 13.sp
+                                )
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        text = typeLabel,
+                                        color = if (entryIsMissed) palette.callRed else palette.label,
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                    if (entry.durationSeconds > 0L) {
+                                        Text(
+                                            text = " • ${PhoneFormatUtils.formatDuration(entry.durationSeconds)}",
+                                            color = palette.tertiaryLabel,
+                                            fontSize = 13.sp
+                                        )
+                                    }
+                                }
+                            }
+                            if (idx < activeGroup.entries.take(8).lastIndex) {
+                                HorizontalDivider(
+                                    thickness = 0.5.dp,
+                                    color = palette.separator.copy(alpha = 0.45f)
+                                )
+                            }
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(14.dp))
+                }
 
                 Column(
                     modifier = Modifier
@@ -625,7 +690,12 @@ private fun AppleRecentCallRow(
         CallManager.lookupCachedCnapName(item.number)
     } else null
     val isSpam = item.cachedName.isNullOrBlank() && PhoneFormatUtils.isSuspectedTelemarketer(item.number)
-    val baseTitle = cnapName ?: item.displayTitle
+    val fallbackTitle = if (item.cachedName.isNullOrBlank() && item.number.isNotBlank()) {
+        PhoneFormatUtils.formatDisplayNumber(item.number)
+    } else {
+        item.displayTitle
+    }
+    val baseTitle = cnapName ?: fallbackTitle
     val titleWithCount = if (count > 1) "$baseTitle ($count)" else baseTitle
 
     Column(

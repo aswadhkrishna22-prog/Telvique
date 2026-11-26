@@ -59,6 +59,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.telvique.phone.data.PhoneLayoutMode
 import com.telvique.phone.telecom.CallManager
+import com.telvique.phone.telecom.CallNotificationHelper
 import com.telvique.phone.telecom.CallPhase
 import com.telvique.phone.ui.MainViewModel
 import com.telvique.phone.ui.call.CallActivity
@@ -116,12 +117,15 @@ class MainActivity : ComponentActivity() {
 
     private fun handleDialIntent(intent: Intent?) {
         if (intent == null) return
+        if (intent.getBooleanExtra(CallNotificationHelper.EXTRA_OPEN_RECENTS, false)) {
+            viewModel.onOpenRecentsIntent()
+        }
         val data = intent.data
         if (data?.scheme == "tel") {
             val number = data.schemeSpecificPart.orEmpty()
-            if (number.isNotBlank()) {
-                viewModel.setDialerNumber(number)
-            }
+            viewModel.onDialIntent(number)
+        } else if (intent.action == Intent.ACTION_DIAL && data == null) {
+            viewModel.onDialIntent("")
         }
     }
 }
@@ -135,12 +139,33 @@ private fun TelviqueMainRoot(
     val palette = LocalApplePalette.current
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val telecomState by CallManager.uiState.collectAsStateWithLifecycle()
+    val missedCallCount by CallManager.missedCallCount.collectAsStateWithLifecycle()
+    val keypadTrigger by viewModel.navigateToKeypadTrigger.collectAsStateWithLifecycle()
+    val recentsTrigger by viewModel.navigateToRecentsTrigger.collectAsStateWithLifecycle()
 
     var unifiedTab by rememberSaveable { mutableStateOf(UnifiedTab.KEYPAD) }
     var classicTab by rememberSaveable { mutableStateOf(ClassicTab.KEYPAD) }
     var showUnifiedSettings by rememberSaveable { mutableStateOf(false) }
     var showUnifiedSearch by rememberSaveable { mutableStateOf(false) }
     var showRestrictedSettingsHelp by remember { mutableStateOf(false) }
+
+    LaunchedEffect(keypadTrigger) {
+        if (keypadTrigger > 0) {
+            unifiedTab = UnifiedTab.KEYPAD
+            classicTab = ClassicTab.KEYPAD
+            showUnifiedSettings = false
+            showUnifiedSearch = false
+        }
+    }
+
+    LaunchedEffect(recentsTrigger) {
+        if (recentsTrigger > 0) {
+            unifiedTab = UnifiedTab.CALLS
+            classicTab = ClassicTab.RECENTS
+            showUnifiedSettings = false
+            showUnifiedSearch = false
+        }
+    }
 
     // Switch tab cleanly when user toggles layout mode
     LaunchedEffect(uiState.settings.layoutMode) {
@@ -239,6 +264,17 @@ private fun TelviqueMainRoot(
     val bottomBarReservedHeight = navBarBottomDp + 86.dp
     val isUnified = uiState.settings.layoutMode == PhoneLayoutMode.UNIFIED
 
+    LaunchedEffect(isUnified, unifiedTab, classicTab, missedCallCount) {
+        val viewingRecents = (isUnified && unifiedTab == UnifiedTab.CALLS) ||
+            (!isUnified && classicTab == ClassicTab.RECENTS)
+        if (viewingRecents) {
+            if (missedCallCount > 0) {
+                CallManager.clearMissedCallCount()
+            }
+            CallNotificationHelper.cancelMissedCalls(context)
+        }
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -334,9 +370,12 @@ private fun TelviqueMainRoot(
                                     dialpadVibrateEnabled = uiState.settings.dialpadVibrateEnabled,
                                     speedDial = uiState.settings.speedDial,
                                     voicemailNumber = uiState.settings.voicemailNumber,
+                                    simAccounts = uiState.simAccounts,
+                                    preferredSimId = uiState.settings.preferredSimId,
                                     showTopSettingsButton = true,
                                     bottomInsetPadding = bottomBarReservedHeight,
                                     onOpenSettings = { showUnifiedSettings = true },
+                                    onSelectPreferredSim = viewModel::setPreferredSimId,
                                     onDigitPress = viewModel::appendDialDigit,
                                     onSetNumber = viewModel::setDialerNumber,
                                     onBackspace = viewModel::backspaceDialDigit,
@@ -405,9 +444,12 @@ private fun TelviqueMainRoot(
                                     dialpadVibrateEnabled = uiState.settings.dialpadVibrateEnabled,
                                     speedDial = uiState.settings.speedDial,
                                     voicemailNumber = uiState.settings.voicemailNumber,
+                                    simAccounts = uiState.simAccounts,
+                                    preferredSimId = uiState.settings.preferredSimId,
                                     showTopSettingsButton = false,
                                     bottomInsetPadding = bottomBarReservedHeight,
                                     onOpenSettings = { classicTab = ClassicTab.SETTINGS },
+                                    onSelectPreferredSim = viewModel::setPreferredSimId,
                                     onDigitPress = viewModel::appendDialDigit,
                                     onSetNumber = viewModel::setDialerNumber,
                                     onBackspace = viewModel::backspaceDialDigit,
@@ -454,9 +496,14 @@ private fun TelviqueMainRoot(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     if (isUnified) {
-                        val unifiedItems = remember {
+                        val unifiedItems = remember(missedCallCount) {
                             listOf(
-                                LiquidPhoneTabItem("Calls", ApplePhoneIcons.ClockFill, ApplePhoneIcons.ClockFill),
+                                LiquidPhoneTabItem(
+                                    label = "Calls",
+                                    selectedIcon = ApplePhoneIcons.ClockFill,
+                                    unselectedIcon = ApplePhoneIcons.ClockFill,
+                                    badgeCount = missedCallCount
+                                ),
                                 LiquidPhoneTabItem("Contacts", ApplePhoneIcons.PersonCropCircleFill, ApplePhoneIcons.PersonCropCircleFill),
                                 LiquidPhoneTabItem("Keypad", ApplePhoneIcons.KeypadDots, ApplePhoneIcons.KeypadDots),
                             )
@@ -484,10 +531,15 @@ private fun TelviqueMainRoot(
                             liquidState = navLiquidState,
                         )
                     } else {
-                        val classicItems = remember {
+                        val classicItems = remember(missedCallCount) {
                             listOf(
                                 LiquidPhoneTabItem("Favorites", ApplePhoneIcons.StarFill, ApplePhoneIcons.StarFill),
-                                LiquidPhoneTabItem("Recents", ApplePhoneIcons.ClockFill, ApplePhoneIcons.ClockFill),
+                                LiquidPhoneTabItem(
+                                    label = "Recents",
+                                    selectedIcon = ApplePhoneIcons.ClockFill,
+                                    unselectedIcon = ApplePhoneIcons.ClockFill,
+                                    badgeCount = missedCallCount
+                                ),
                                 LiquidPhoneTabItem("Contacts", ApplePhoneIcons.PersonCropCircleFill, ApplePhoneIcons.PersonCropCircleFill),
                                 LiquidPhoneTabItem("Keypad", ApplePhoneIcons.KeypadDots, ApplePhoneIcons.KeypadDots),
                                 LiquidPhoneTabItem("Settings", ApplePhoneIcons.GearShapeFill, ApplePhoneIcons.GearShapeFill),
