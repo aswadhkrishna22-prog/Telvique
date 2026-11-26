@@ -14,6 +14,8 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
@@ -39,7 +41,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -56,8 +57,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.kyant.backdrop.backdrops.layerBackdrop
-import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import com.telvique.phone.data.PhoneLayoutMode
 import com.telvique.phone.telecom.CallManager
 import com.telvique.phone.telecom.CallPhase
@@ -71,8 +70,6 @@ import com.telvique.phone.ui.favorites.FavoritesScreen
 import com.telvique.phone.ui.glass.LiquidCircularGlassButton
 import com.telvique.phone.ui.glass.LiquidPhoneTabBar
 import com.telvique.phone.ui.glass.LiquidPhoneTabItem
-import com.telvique.phone.ui.glass.LocalGlassBackdrop
-import com.telvique.phone.ui.glass.isBackdropGlassCapable
 import com.telvique.phone.ui.icons.ApplePhoneIcons
 import com.telvique.phone.ui.recents.RecentsScreen
 import com.telvique.phone.ui.search.UnifiedSearchOverlay
@@ -234,14 +231,7 @@ private fun TelviqueMainRoot(
     }
 
     val ongoingCall = telecomState.primaryCall?.takeIf { it.phase != CallPhase.DISCONNECTED }
-    val glassCapable = isBackdropGlassCapable()
     val appBackground = palette.background
-    val glassBackdrop = if (glassCapable) {
-        rememberLayerBackdrop {
-            drawRect(appBackground)
-            drawContent()
-        }
-    } else null
     val useLiquidNav = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
     val navLiquidState = if (useLiquidNav) rememberLiquidState() else null
 
@@ -249,28 +239,18 @@ private fun TelviqueMainRoot(
     val bottomBarReservedHeight = navBarBottomDp + 86.dp
     val isUnified = uiState.settings.layoutMode == PhoneLayoutMode.UNIFIED
 
-    CompositionLocalProvider(
-        LocalGlassBackdrop provides glassBackdrop,
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(appBackground)
     ) {
+        // Content Plane (captured by Fletchmckee Liquid for the sibling bottom tab bar)
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .background(appBackground)
+                .then(if (navLiquidState != null) Modifier.liquefiable(navLiquidState) else Modifier)
         ) {
-            // Childless background layer captured by Kyant Backdrop (strictly acyclic!)
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(appBackground)
-                    .then(if (glassBackdrop != null) Modifier.layerBackdrop(glassBackdrop) else Modifier)
-            )
-
-            // Content Plane (captured by Fletchmckee Liquid for the sibling bottom tab bar)
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .then(if (navLiquidState != null) Modifier.liquefiable(navLiquidState) else Modifier)
-            ) {
                 Column(modifier = Modifier.fillMaxSize()) {
                     if (ongoingCall != null) {
                         Row(
@@ -307,7 +287,12 @@ private fun TelviqueMainRoot(
 
                     Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                         if (isUnified) {
-                            when (unifiedTab) {
+                            Crossfade(
+                                targetState = unifiedTab,
+                                animationSpec = tween(durationMillis = 140),
+                                label = "unifiedTabCrossfade"
+                            ) { tab ->
+                            when (tab) {
                                 UnifiedTab.CALLS -> RecentsScreen(
                                     callLogs = uiState.filteredCallLogs,
                                     favorites = uiState.favoriteContacts,
@@ -357,8 +342,14 @@ private fun TelviqueMainRoot(
                                     onCallClick = { number, forceSim -> viewModel.callNumber(number, forceSim) }
                                 )
                             }
+                            }
                         } else {
-                            when (classicTab) {
+                            Crossfade(
+                                targetState = classicTab,
+                                animationSpec = tween(durationMillis = 140),
+                                label = "classicTabCrossfade"
+                            ) { tab ->
+                            when (tab) {
                                 ClassicTab.FAVORITES -> FavoritesScreen(
                                     favorites = uiState.favoriteContacts,
                                     blockedNumbers = uiState.settings.blockedNumbers,
@@ -439,6 +430,7 @@ private fun TelviqueMainRoot(
                                     onUpdateQuickResponse = viewModel::updateQuickResponse
                                 )
                             }
+                            }
                         }
                     }
                 }
@@ -483,6 +475,7 @@ private fun TelviqueMainRoot(
                             iconSize = 22.dp,
                             tint = palette.label,
                             isDark = palette.isDark,
+                            liquidState = navLiquidState,
                         )
                     } else {
                         val classicItems = remember {
@@ -549,7 +542,6 @@ private fun TelviqueMainRoot(
                 )
             }
         }
-    }
 
     if (showRestrictedSettingsHelp) {
         AlertDialog(

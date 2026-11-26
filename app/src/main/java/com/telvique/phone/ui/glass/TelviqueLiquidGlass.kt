@@ -82,7 +82,7 @@ private object BackdropGlassRecipe {
     const val MIN_SCRIM = 0.18f
     const val MAX_SCRIM = 0.56f
     const val PRESS_BLUR_DP = 2f
-    const val HAZE_QUALITY_FRACTION = 0.5f
+    const val HAZE_QUALITY_FRACTION = 0.35f
 }
 
 val LocalGlassBackdrop = staticCompositionLocalOf<Backdrop?> { null }
@@ -426,7 +426,7 @@ fun HeaderGlassBackdrop(
                 backgroundColor(surfaceColor)
                 colorEffects(listOf(tintEffect))
                 fallbackColorEffect(tintEffect)
-                blurRadius(18.dp)
+                blurRadius(12.dp)
                 noiseFactor(0.01f)
                 mask(
                     Brush.verticalGradient(

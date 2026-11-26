@@ -2,6 +2,9 @@ package com.telvique.phone.ui.dialer
 
 import android.media.AudioManager
 import android.media.ToneGenerator
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
@@ -10,6 +13,8 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -39,7 +44,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
@@ -56,8 +63,6 @@ import com.telvique.phone.data.PhoneFormatUtils
 import com.telvique.phone.ui.components.ContactAvatar
 import com.telvique.phone.ui.components.openAddContact
 import com.telvique.phone.ui.glass.LiquidCircularGlassButton
-import com.telvique.phone.ui.glass.LocalGlassBackdrop
-import com.telvique.phone.ui.glass.backdropLiquidGlass
 import com.telvique.phone.ui.glass.clearLiquidGlassPill
 import com.telvique.phone.ui.glass.liquidBubbleHighlight
 import com.telvique.phone.ui.icons.ApplePhoneIcons
@@ -96,7 +101,6 @@ fun DialerScreen(
     val context = LocalContext.current
     val haptic = LocalHapticFeedback.current
     val palette = LocalApplePalette.current
-    val backdrop = LocalGlassBackdrop.current
     @Suppress("DEPRECATION")
     val clipboard = LocalClipboardManager.current
 
@@ -306,7 +310,6 @@ fun DialerScreen(
                         AppleLiquidDialKey(
                             key = key,
                             isDark = palette.isDark,
-                            backdrop = backdrop,
                             onTap = {
                                 playKeyFeedback(key.digit)
                                 onDigitPress(key.digit)
@@ -441,32 +444,48 @@ fun DialerScreen(
 private fun AppleLiquidDialKey(
     key: DialKey,
     isDark: Boolean,
-    backdrop: com.kyant.backdrop.Backdrop?,
     onTap: () -> Unit,
     onLongTap: (() -> Unit)? = null
 ) {
     val palette = LocalApplePalette.current
-    val glassMod = if (backdrop != null) {
-        Modifier.backdropLiquidGlass(
-            backdrop = backdrop,
-            shape = CircleShape,
-            isDark = isDark,
-            interactive = true,
-            pressedScale = 1.07f,
-            scrimAlpha = if (isDark) 0.24f else 0.56f,
-        )
-    } else {
-        Modifier
-            .background(palette.keypadKeyFill, CircleShape)
-            .liquidBubbleHighlight(isDark = isDark, cornerFraction = 0.5f) { 0.8f }
-    }
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (isPressed) 1.07f else 1f,
+        animationSpec = spring(dampingRatio = 0.65f, stiffness = 650f),
+        label = "dialKeyScale"
+    )
+    val keyFill by animateColorAsState(
+        targetValue = when {
+            isPressed && isDark -> Color(0xFF4C4C52)
+            isPressed -> Color(0xFFD1D1D6)
+            isDark -> Color(0xFF262629)
+            else -> palette.keypadKeyFill
+        },
+        label = "dialKeyFill"
+    )
 
     Column(
         modifier = Modifier
             .size(76.dp)
-            .then(glassMod)
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
             .clip(CircleShape)
+            .background(
+                brush = Brush.verticalGradient(
+                    listOf(
+                        keyFill.copy(alpha = 0.95f),
+                        keyFill.copy(alpha = 0.85f),
+                    )
+                ),
+                shape = CircleShape
+            )
+            .liquidBubbleHighlight(isDark = isDark, cornerFraction = 0.5f) { if (isPressed) 1f else 0.72f }
             .combinedClickable(
+                interactionSource = interactionSource,
+                indication = null,
                 onClick = onTap,
                 onLongClick = onLongTap
             ),

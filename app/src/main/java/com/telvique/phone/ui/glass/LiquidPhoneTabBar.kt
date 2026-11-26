@@ -3,7 +3,6 @@ package com.telvique.phone.ui.glass
 import android.os.Build
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -16,6 +15,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -83,7 +83,6 @@ import io.github.fletchmckee.liquid.LiquidState
 import io.github.fletchmckee.liquid.liquefiable
 import io.github.fletchmckee.liquid.liquid
 import io.github.fletchmckee.liquid.rememberLiquidState
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -393,11 +392,11 @@ fun LiquidPhoneTabBar(
                             val amount = lift.coerceIn(0f, 1f)
                             shape = LensShape
                             frost = 0.dp
-                            refraction = 0.08f + 0.37f * amount
-                            curve = 0.04f + 0.16f * amount
-                            edge = 0.012f + 0.023f * amount
-                            dispersion = 0.14f * amount
-                            saturation = 1.10f
+                            refraction = 0.05f + 0.22f * amount
+                            curve = 0.03f + 0.12f * amount
+                            edge = 0.010f + 0.018f * amount
+                            dispersion = 0.08f * amount
+                            saturation = 1.08f
                             tint = Color.White.copy(alpha = if (isDark) 0.018f else 0.028f)
                         },
                 )
@@ -419,33 +418,57 @@ fun LiquidCircularGlassButton(
     iconSize: Dp = 22.dp,
     tint: Color = LocalApplePalette.current.label,
     isDark: Boolean = isSystemInDarkTheme(),
+    liquidState: LiquidState? = null,
 ) {
-    val backdrop = LocalGlassBackdrop.current
+    val palette = LocalApplePalette.current
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val pressScale by animateFloatAsState(
+        targetValue = if (isPressed) 1.08f else 1f,
+        animationSpec = spring(dampingRatio = 0.6f, stiffness = 550f),
+        label = "circlePressScale"
+    )
+    val surfaceTint = if (isDark) Color(0xFF14161C).copy(alpha = 0.42f) else Color.White.copy(alpha = 0.64f)
 
-    val glassModifier = if (backdrop != null) {
-        Modifier.backdropLiquidGlass(
-            backdrop = backdrop,
-            shape = CircleShape,
-            isDark = isDark,
-            interactive = true,
-            pressedScale = 1.08f,
-        )
+    val glassModifier = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && liquidState != null) {
+        Modifier
+            .shadow(6.dp, CircleShape, clip = false, ambientColor = Color.Black.copy(alpha = 0.08f))
+            .background(palette.cardSurface, CircleShape)
+            .liquid(liquidState) {
+                shape = CircleShape
+                frost = 8.dp
+                refraction = 0.05f
+                curve = 0.10f
+                edge = 0.012f
+                saturation = 1.08f
+                dispersion = 0f
+                tint = surfaceTint
+            }
+            .liquidBubbleHighlight(isDark = isDark, cornerFraction = 0.5f)
     } else {
         Modifier.clearLiquidGlassPill(
             shape = CircleShape,
             hazeState = null,
             isDark = isDark,
-            blurRadius = 10.dp,
-            shadowElevation = 6.dp,
+            blurRadius = 8.dp,
+            shadowElevation = 4.dp,
         )
     }
 
     Box(
         modifier = modifier
             .size(size)
+            .graphicsLayer {
+                scaleX = pressScale
+                scaleY = pressScale
+            }
             .then(glassModifier)
             .clip(CircleShape)
-            .clickable(onClick = onClick),
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = onClick
+            ),
         contentAlignment = Alignment.Center,
     ) {
         Icon(
@@ -545,52 +568,16 @@ private fun StaggeredLabelReveal(
     captured: Boolean,
     modifier: Modifier = Modifier,
 ) {
-    if (captured) {
-        Text(
-            text = text,
-            color = tint,
-            fontSize = 12.sp,
-            fontWeight = FontWeight.SemiBold,
-            maxLines = 1,
-            softWrap = false,
-            overflow = TextOverflow.Clip,
-            modifier = modifier,
-        )
-        return
-    }
-
-    val density = LocalDensity.current
-    val slidePx = with(density) { 5.dp.toPx() }
-    Row(
+    Text(
+        text = text,
+        color = tint,
+        fontSize = 12.sp,
+        fontWeight = FontWeight.SemiBold,
+        maxLines = 1,
+        softWrap = false,
+        overflow = TextOverflow.Clip,
         modifier = modifier,
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.Start,
-    ) {
-        text.forEachIndexed { index, char ->
-            val charAnim = remember(text, index) { Animatable(0f) }
-            LaunchedEffect(charAnim) {
-                delay(index * 20L)
-                charAnim.animateTo(
-                    targetValue = 1f,
-                    animationSpec = tween(durationMillis = 140, easing = LinearOutSlowInEasing),
-                )
-            }
-            Text(
-                text = char.toString(),
-                color = tint,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                softWrap = false,
-                overflow = TextOverflow.Clip,
-                modifier = Modifier.graphicsLayer {
-                    val p = charAnim.value.coerceIn(0f, 1f)
-                    alpha = p
-                    translationY = (1f - p) * slidePx
-                },
-            )
-        }
-    }
+    )
 }
 
 private fun rawPosition(x: Float, width: Float, itemCount: Int): Float {
@@ -637,14 +624,14 @@ private fun Modifier.captureHeadroom(padding: Dp): Modifier = layout { measurabl
     layout(width, height) { placeable.place(-inset, -inset) }
 }
 
-private fun Modifier.navigationRail(state: LiquidState, color: Color, blurRadius: Dp = 12.dp): Modifier =
+private fun Modifier.navigationRail(state: LiquidState, color: Color, blurRadius: Dp = 8.dp): Modifier =
     liquid(state) {
         shape = CircleShape
         frost = blurRadius
-        refraction = 0.07f
-        curve = 0.12f
-        edge = 0.012f
-        saturation = 1.1f
+        refraction = 0.05f
+        curve = 0.08f
+        edge = 0.010f
+        saturation = 1.08f
         dispersion = 0f
         tint = color
     }

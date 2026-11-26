@@ -751,7 +751,9 @@ private fun LiquidCallControlTile(
                     shape = CircleShape,
                     isDark = true,
                     interactive = true,
-                    pressedScale = 1.07f,
+                    pressedScale = 1.06f,
+                    hasLens = false,
+                    blurScale = 0.75f,
                     scrimAlpha = 0.22f,
                     fallbackTint = Color.White.copy(alpha = 0.16f)
                 )
@@ -864,7 +866,9 @@ private fun AppleInCallDtmfKeypad(
                                 shape = CircleShape,
                                 isDark = true,
                                 interactive = true,
-                                pressedScale = 1.07f,
+                                pressedScale = 1.06f,
+                                hasLens = false,
+                                blurScale = 0.7f,
                                 scrimAlpha = 0.22f,
                                 fallbackTint = Color.White.copy(alpha = 0.16f)
                             )
