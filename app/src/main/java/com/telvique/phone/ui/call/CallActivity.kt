@@ -1,5 +1,6 @@
 package com.telvique.phone.ui.call
 
+import android.annotation.SuppressLint
 import android.app.KeyguardManager
 import android.content.Intent
 import android.os.Build
@@ -153,11 +154,7 @@ class CallActivity : ComponentActivity() {
                     onAnswerAndHoldOthers = { CallManager.answerAndHoldOthers(it) },
                     onAnswerAndEndOthers = { CallManager.answerAndEndOthers(it) },
                     onDecline = { CallManager.decline(it) },
-                    onSilenceRinger = {
-                        runCatching {
-                            getSystemService(TelecomManager::class.java)?.silenceRinger()
-                        }
-                    },
+                    onSilenceRinger = { silenceIncomingRinger() },
                     onBlockAndDecline = { number, id ->
                         lifecycleScope.launch {
                             if (number.isNotBlank()) settingsRepo.blockNumber(number)
@@ -193,13 +190,18 @@ class CallActivity : ComponentActivity() {
         }
     }
 
+    @SuppressLint("MissingPermission")
+    private fun silenceIncomingRinger() {
+        runCatching {
+            getSystemService(TelecomManager::class.java)?.silenceRinger()
+        }
+    }
+
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
         if (keyCode == KeyEvent.KEYCODE_VOLUME_DOWN || keyCode == KeyEvent.KEYCODE_VOLUME_UP) {
             val phase = CallManager.uiState.value.primaryCall?.phase
             if (phase == CallPhase.RINGING) {
-                runCatching {
-                    getSystemService(TelecomManager::class.java)?.silenceRinger()
-                }
+                silenceIncomingRinger()
                 return true
             }
         }
