@@ -57,7 +57,6 @@ import com.telvique.phone.ui.components.ContactAvatar
 import com.telvique.phone.ui.components.openAddContact
 import com.telvique.phone.ui.glass.LiquidCircularGlassButton
 import com.telvique.phone.ui.glass.LocalGlassBackdrop
-import com.telvique.phone.ui.glass.LocalHazeState
 import com.telvique.phone.ui.glass.backdropLiquidGlass
 import com.telvique.phone.ui.glass.clearLiquidGlassPill
 import com.telvique.phone.ui.glass.liquidBubbleHighlight
@@ -98,7 +97,6 @@ fun DialerScreen(
     val haptic = LocalHapticFeedback.current
     val palette = LocalApplePalette.current
     val backdrop = LocalGlassBackdrop.current
-    val hazeState = LocalHazeState.current
     @Suppress("DEPRECATION")
     val clipboard = LocalClipboardManager.current
 
@@ -189,7 +187,7 @@ fun DialerScreen(
                                     .fillMaxWidth()
                                     .clearLiquidGlassPill(
                                         shape = RoundedCornerShape(16.dp),
-                                        hazeState = hazeState,
+                                        hazeState = null,
                                         isDark = palette.isDark,
                                         blurRadius = 8.dp,
                                         shadowElevation = 2.dp,

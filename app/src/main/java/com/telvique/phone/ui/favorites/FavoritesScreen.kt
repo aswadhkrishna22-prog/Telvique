@@ -38,9 +38,10 @@ import com.telvique.phone.ui.components.ContactAvatar
 import com.telvique.phone.ui.contacts.AppleContactDetailSheet
 import com.telvique.phone.ui.glass.HeaderGlassBackdrop
 import com.telvique.phone.ui.glass.LiquidCircularGlassButton
-import com.telvique.phone.ui.glass.LocalHazeState
 import com.telvique.phone.ui.icons.ApplePhoneIcons
 import com.telvique.phone.ui.theme.LocalApplePalette
+import dev.chrisbanes.haze.HazeState
+import dev.chrisbanes.haze.hazeSource
 
 @Composable
 fun FavoritesScreen(
@@ -53,7 +54,7 @@ fun FavoritesScreen(
     onAddFavoritePrompt: () -> Unit,
 ) {
     val palette = LocalApplePalette.current
-    val hazeState = LocalHazeState.current
+    val hazeState = remember { HazeState() }
     val listState = rememberLazyListState()
     var selectedContact by remember { mutableStateOf<ContactItem?>(null) }
 
@@ -110,7 +111,9 @@ fun FavoritesScreen(
         } else {
             LazyColumn(
                 state = listState,
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .hazeSource(hazeState),
                 contentPadding = PaddingValues(bottom = bottomInsetPadding + 20.dp)
             ) {
                 item(key = "fav_header") {

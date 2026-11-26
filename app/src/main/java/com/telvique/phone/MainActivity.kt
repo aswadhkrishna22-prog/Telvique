@@ -72,7 +72,6 @@ import com.telvique.phone.ui.glass.LiquidCircularGlassButton
 import com.telvique.phone.ui.glass.LiquidPhoneTabBar
 import com.telvique.phone.ui.glass.LiquidPhoneTabItem
 import com.telvique.phone.ui.glass.LocalGlassBackdrop
-import com.telvique.phone.ui.glass.LocalHazeState
 import com.telvique.phone.ui.glass.isBackdropGlassCapable
 import com.telvique.phone.ui.icons.ApplePhoneIcons
 import com.telvique.phone.ui.recents.RecentsScreen
@@ -80,8 +79,6 @@ import com.telvique.phone.ui.search.UnifiedSearchOverlay
 import com.telvique.phone.ui.settings.SettingsScreen
 import com.telvique.phone.ui.theme.LocalApplePalette
 import com.telvique.phone.ui.theme.TelviqueTheme
-import dev.chrisbanes.haze.HazeState
-import dev.chrisbanes.haze.hazeSource
 import io.github.fletchmckee.liquid.liquefiable
 import io.github.fletchmckee.liquid.rememberLiquidState
 
@@ -245,7 +242,6 @@ private fun TelviqueMainRoot(
             drawContent()
         }
     } else null
-    val hazeState = remember { HazeState() }
     val useLiquidNav = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
     val navLiquidState = if (useLiquidNav) rememberLiquidState() else null
 
@@ -255,20 +251,24 @@ private fun TelviqueMainRoot(
 
     CompositionLocalProvider(
         LocalGlassBackdrop provides glassBackdrop,
-        LocalHazeState provides hazeState,
     ) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .background(appBackground)
         ) {
-            // Content Plane (captured by Haze + Kyant Backdrop + Fletchmckee Liquid)
+            // Childless background layer captured by Kyant Backdrop (strictly acyclic!)
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(appBackground)
-                    .hazeSource(hazeState)
                     .then(if (glassBackdrop != null) Modifier.layerBackdrop(glassBackdrop) else Modifier)
+            )
+
+            // Content Plane (captured by Fletchmckee Liquid for the sibling bottom tab bar)
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
                     .then(if (navLiquidState != null) Modifier.liquefiable(navLiquidState) else Modifier)
             ) {
                 Column(modifier = Modifier.fillMaxSize()) {

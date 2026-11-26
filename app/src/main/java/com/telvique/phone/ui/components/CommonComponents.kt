@@ -51,7 +51,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import com.telvique.phone.data.SimAccountInfo
-import com.telvique.phone.ui.glass.LocalHazeState
 import com.telvique.phone.ui.glass.clearLiquidGlassPill
 import com.telvique.phone.ui.icons.ApplePhoneIcons
 import com.telvique.phone.ui.theme.LocalApplePalette
@@ -157,7 +156,6 @@ fun SetupPromptBanner(
 ) {
     if (isDefaultDialer && missingPermissionsCount == 0) return
     val palette = LocalApplePalette.current
-    val hazeState = LocalHazeState.current
 
     Row(
         modifier = Modifier
@@ -165,7 +163,7 @@ fun SetupPromptBanner(
             .padding(horizontal = 16.dp, vertical = 6.dp)
             .clearLiquidGlassPill(
                 shape = RoundedCornerShape(18.dp),
-                hazeState = hazeState,
+                hazeState = null,
                 isDark = palette.isDark,
                 blurRadius = 10.dp,
                 shadowElevation = 4.dp,

@@ -68,12 +68,13 @@ import com.telvique.phone.ui.components.openSystemContact
 import com.telvique.phone.ui.components.posterColorsForName
 import com.telvique.phone.ui.glass.HeaderGlassBackdrop
 import com.telvique.phone.ui.glass.LiquidCircularGlassButton
-import com.telvique.phone.ui.glass.LocalHazeState
 import com.telvique.phone.ui.glass.clearLiquidGlassPill
 import com.telvique.phone.ui.icons.ApplePhoneIcons
 import com.telvique.phone.ui.recents.AppleSheetActionCircle
 import com.telvique.phone.ui.theme.LocalApplePalette
 import com.telvique.phone.ui.theme.TelviqueColors
+import dev.chrisbanes.haze.HazeState
+import dev.chrisbanes.haze.hazeSource
 import kotlinx.coroutines.launch
 
 @Composable
@@ -91,7 +92,7 @@ fun ContactsScreen(
 ) {
     val context = LocalContext.current
     val palette = LocalApplePalette.current
-    val hazeState = LocalHazeState.current
+    val hazeState = remember { HazeState() }
     val haptics = LocalHapticFeedback.current
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
@@ -125,7 +126,9 @@ fun ContactsScreen(
     Box(modifier = Modifier.fillMaxSize()) {
         LazyColumn(
             state = listState,
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .fillMaxSize()
+                .hazeSource(hazeState),
             contentPadding = PaddingValues(bottom = bottomInsetPadding + 24.dp)
         ) {
             item(key = "contacts_header") {
@@ -344,14 +347,13 @@ fun AppleSearchField(
     modifier: Modifier = Modifier
 ) {
     val palette = LocalApplePalette.current
-    val hazeState = LocalHazeState.current
 
     Row(
         modifier = modifier
             .height(42.dp)
             .clearLiquidGlassPill(
                 shape = CircleShape,
-                hazeState = hazeState,
+                hazeState = null,
                 isDark = palette.isDark,
                 blurRadius = 8.dp,
                 shadowElevation = 2.dp,

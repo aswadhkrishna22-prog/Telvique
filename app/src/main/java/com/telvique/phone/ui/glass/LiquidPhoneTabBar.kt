@@ -258,13 +258,12 @@ fun LiquidPhoneTabBar(
                     .navigationRail(liquidState, railTint),
             )
         } else {
-            val hazeState = LocalHazeState.current
             Box(
                 Modifier
                     .matchParentSize()
                     .clearLiquidGlassPill(
                         shape = CircleShape,
-                        hazeState = hazeState,
+                        hazeState = null,
                         isDark = isDark,
                         blurRadius = 12.dp,
                         shadowElevation = 0.dp,
@@ -422,7 +421,6 @@ fun LiquidCircularGlassButton(
     isDark: Boolean = isSystemInDarkTheme(),
 ) {
     val backdrop = LocalGlassBackdrop.current
-    val hazeState = LocalHazeState.current
 
     val glassModifier = if (backdrop != null) {
         Modifier.backdropLiquidGlass(
@@ -435,7 +433,7 @@ fun LiquidCircularGlassButton(
     } else {
         Modifier.clearLiquidGlassPill(
             shape = CircleShape,
-            hazeState = hazeState,
+            hazeState = null,
             isDark = isDark,
             blurRadius = 10.dp,
             shadowElevation = 6.dp,

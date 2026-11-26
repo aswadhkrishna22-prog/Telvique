@@ -86,7 +86,6 @@ private object BackdropGlassRecipe {
 }
 
 val LocalGlassBackdrop = staticCompositionLocalOf<Backdrop?> { null }
-val LocalHazeState = staticCompositionLocalOf<HazeState?> { null }
 
 @Composable
 fun isBackdropGlassCapable(): Boolean {

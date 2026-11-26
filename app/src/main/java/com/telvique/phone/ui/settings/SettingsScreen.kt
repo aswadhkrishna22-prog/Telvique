@@ -57,9 +57,10 @@ import com.telvique.phone.data.TelviqueSettings
 import com.telvique.phone.ui.components.AppleLargeHeader
 import com.telvique.phone.ui.glass.HeaderGlassBackdrop
 import com.telvique.phone.ui.glass.LiquidCircularGlassButton
-import com.telvique.phone.ui.glass.LocalHazeState
 import com.telvique.phone.ui.icons.ApplePhoneIcons
 import com.telvique.phone.ui.theme.LocalApplePalette
+import dev.chrisbanes.haze.HazeState
+import dev.chrisbanes.haze.hazeSource
 
 @Composable
 fun SettingsScreen(
@@ -82,7 +83,7 @@ fun SettingsScreen(
     onUpdateQuickResponse: (Int, String) -> Unit
 ) {
     val palette = LocalApplePalette.current
-    val hazeState = LocalHazeState.current
+    val hazeState = remember { HazeState() }
     val listState = rememberLazyListState()
     var showAddBlockDialog by remember { mutableStateOf(false) }
     var editingResponsePair by remember { mutableStateOf<Pair<Int, String>?>(null) }
@@ -101,7 +102,9 @@ fun SettingsScreen(
     ) {
         LazyColumn(
             state = listState,
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .fillMaxSize()
+                .hazeSource(hazeState),
             contentPadding = PaddingValues(bottom = bottomInsetPadding + 28.dp)
         ) {
             item(key = "settings_header") {
