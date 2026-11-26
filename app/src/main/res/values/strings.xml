@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Telvique</string>
+    <string name="channel_incoming_call">Incoming Calls</string>
+    <string name="channel_ongoing_call">Ongoing Calls</string>
+</resources>
