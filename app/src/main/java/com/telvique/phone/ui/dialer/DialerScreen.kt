@@ -174,8 +174,8 @@ fun DialerScreen(
                     Row(
                         modifier = Modifier
                             .clearLiquidGlassPill(
-                                isDark = palette.isDark,
-                                tint = palette.cardSurface
+                                shape = CircleShape,
+                                isDark = palette.isDark
                             )
                             .clip(CircleShape)
                             .clickable { showSimMenu = true }

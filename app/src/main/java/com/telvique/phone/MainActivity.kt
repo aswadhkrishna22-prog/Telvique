@@ -500,8 +500,8 @@ private fun TelviqueMainRoot(
                             listOf(
                                 LiquidPhoneTabItem(
                                     label = "Calls",
-                                    selectedIcon = ApplePhoneIcons.ClockFill,
-                                    unselectedIcon = ApplePhoneIcons.ClockFill,
+                                    icon = ApplePhoneIcons.ClockFill,
+                                    activeIcon = ApplePhoneIcons.ClockFill,
                                     badgeCount = missedCallCount
                                 ),
                                 LiquidPhoneTabItem("Contacts", ApplePhoneIcons.PersonCropCircleFill, ApplePhoneIcons.PersonCropCircleFill),
@@ -536,8 +536,8 @@ private fun TelviqueMainRoot(
                                 LiquidPhoneTabItem("Favorites", ApplePhoneIcons.StarFill, ApplePhoneIcons.StarFill),
                                 LiquidPhoneTabItem(
                                     label = "Recents",
-                                    selectedIcon = ApplePhoneIcons.ClockFill,
-                                    unselectedIcon = ApplePhoneIcons.ClockFill,
+                                    icon = ApplePhoneIcons.ClockFill,
+                                    activeIcon = ApplePhoneIcons.ClockFill,
                                     badgeCount = missedCallCount
                                 ),
                                 LiquidPhoneTabItem("Contacts", ApplePhoneIcons.PersonCropCircleFill, ApplePhoneIcons.PersonCropCircleFill),
