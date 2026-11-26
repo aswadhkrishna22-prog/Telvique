@@ -18,7 +18,8 @@ data class TelviqueSettings(
     val vibrateOnConnectEnabled: Boolean = true,
     val blockedNumbers: Set<String> = emptySet(),
     val quickResponses: List<String> = DEFAULT_QUICK_RESPONSES,
-    val preferredSimId: String? = null
+    val preferredSimId: String? = null,
+    val layoutMode: PhoneLayoutMode = PhoneLayoutMode.UNIFIED
 ) {
     companion object {
         val DEFAULT_QUICK_RESPONSES = listOf(
@@ -39,6 +40,7 @@ class SettingsRepository(private val context: Context) {
         val BLOCKED_NUMBERS = stringSetPreferencesKey("blocked_numbers")
         val QUICK_RESPONSES = stringPreferencesKey("quick_responses_joined")
         val PREFERRED_SIM_ID = stringPreferencesKey("preferred_sim_id")
+        val LAYOUT_MODE = stringPreferencesKey("phone_layout_mode")
     }
 
     val settingsFlow: Flow<TelviqueSettings> = context.telviqueDataStore.data.map { prefs ->
@@ -48,13 +50,17 @@ class SettingsRepository(private val context: Context) {
         } else {
             rawResponses.split("|||").filter { it.isNotBlank() }
         }
+        val mode = prefs[Keys.LAYOUT_MODE]
+            ?.let { raw -> PhoneLayoutMode.entries.firstOrNull { it.name == raw } }
+            ?: PhoneLayoutMode.UNIFIED
         TelviqueSettings(
             dialpadTonesEnabled = prefs[Keys.DIALPAD_TONES] ?: true,
             dialpadVibrateEnabled = prefs[Keys.DIALPAD_VIBRATE] ?: true,
             vibrateOnConnectEnabled = prefs[Keys.VIBRATE_ON_CONNECT] ?: true,
             blockedNumbers = prefs[Keys.BLOCKED_NUMBERS] ?: emptySet(),
             quickResponses = responses,
-            preferredSimId = prefs[Keys.PREFERRED_SIM_ID]?.takeIf { it.isNotBlank() }
+            preferredSimId = prefs[Keys.PREFERRED_SIM_ID]?.takeIf { it.isNotBlank() },
+            layoutMode = mode
         )
     }
 
@@ -78,6 +84,10 @@ class SettingsRepository(private val context: Context) {
                 it[Keys.PREFERRED_SIM_ID] = simId
             }
         }
+    }
+
+    suspend fun setLayoutMode(mode: PhoneLayoutMode) {
+        context.telviqueDataStore.edit { it[Keys.LAYOUT_MODE] = mode.name }
     }
 
     suspend fun blockNumber(number: String) {

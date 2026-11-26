@@ -3,6 +3,8 @@
 A clean, full-featured Android Default Phone & Dialer app built with Kotlin, Jetpack Compose, and Android Telecom APIs.
 
 ## Features
+- **Apple iOS 26 Liquid Glass UI**: Real-time backdrop blur & lens refraction (`fletchmckee.liquid`, `kyant0.backdrop`, `haze`), custom SF Symbols-inspired vector icons, floating draggable Liquid Glass tab bar, and Contact Poster atmospheric In-Call screen
+- **Dual Layout Modes**: Switch seamlessly between **Unified** (`Calls`, `Contacts`, `Keypad` + floating `Search` pill) and **Classic** (`Favorites`, `Recents`, `Contacts`, `Keypad`, `Settings`)
 - **Default Dialer Integration** (`RoleManager.ROLE_DIALER` & `InCallService`)
 - **Dialer**: T9 smart contact search, DTMF keypad tones, haptic feedback, paste, dual-SIM support
 - **Recents**: Call history with All / Missed / Incoming / Outgoing filters, search, copy, SMS, block, and delete

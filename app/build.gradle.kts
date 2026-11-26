@@ -64,6 +64,7 @@ dependencies {
     implementation(libs.androidx.compose.runtime)
     implementation(libs.androidx.compose.foundation)
     implementation(libs.androidx.compose.ui)
+    implementation(libs.androidx.compose.ui.util)
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.compose.material.icons.extended)
@@ -71,6 +72,10 @@ dependencies {
     implementation(libs.coil.compose)
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.kotlinx.coroutines.android)
+    implementation(libs.haze)
+    implementation(libs.haze.blur)
+    implementation(libs.kyant.backdrop)
+    implementation(libs.fletchmckee.liquid)
 
     debugImplementation(libs.androidx.compose.ui.tooling)
     testImplementation(libs.junit)

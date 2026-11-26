@@ -12,6 +12,7 @@ import com.telvique.phone.TelviqueApp
 import com.telvique.phone.data.CallLogItem
 import com.telvique.phone.data.CallLogType
 import com.telvique.phone.data.ContactItem
+import com.telvique.phone.data.PhoneLayoutMode
 import com.telvique.phone.data.PhoneRepository
 import com.telvique.phone.data.RecentsFilter
 import com.telvique.phone.data.SimAccountInfo
@@ -325,6 +326,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setPreferredSimId(simId: String?) {
         viewModelScope.launch { settingsRepo.setPreferredSimId(simId) }
+    }
+
+    fun setLayoutMode(mode: PhoneLayoutMode) {
+        viewModelScope.launch { settingsRepo.setLayoutMode(mode) }
     }
 
     fun blockNumber(number: String) {

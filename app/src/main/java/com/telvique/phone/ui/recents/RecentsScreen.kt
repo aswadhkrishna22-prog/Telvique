@@ -1,6 +1,6 @@
 package com.telvique.phone.ui.recents
 
-import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -17,32 +17,27 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.CallMade
-import androidx.compose.material.icons.automirrored.rounded.CallMissed
-import androidx.compose.material.icons.automirrored.rounded.CallReceived
 import androidx.compose.material.icons.rounded.Block
-import androidx.compose.material.icons.rounded.Call
-import androidx.compose.material.icons.rounded.ChatBubbleOutline
-import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.DeleteOutline
-import androidx.compose.material.icons.rounded.DeleteSweep
 import androidx.compose.material.icons.rounded.PersonAdd
-import androidx.compose.material.icons.rounded.Search
-import androidx.compose.material.icons.rounded.Voicemail
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.FilterChip
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Surface
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -50,132 +45,448 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.telvique.phone.data.CallLogItem
 import com.telvique.phone.data.CallLogType
+import com.telvique.phone.data.ContactItem
 import com.telvique.phone.data.PhoneFormatUtils
+import com.telvique.phone.data.PhoneLayoutMode
 import com.telvique.phone.data.RecentsFilter
+import com.telvique.phone.ui.components.AppleLargeHeader
 import com.telvique.phone.ui.components.ContactAvatar
 import com.telvique.phone.ui.components.copyNumberToClipboard
 import com.telvique.phone.ui.components.openAddContact
 import com.telvique.phone.ui.components.openSmsApp
-import com.telvique.phone.ui.theme.TelviqueColors
+import com.telvique.phone.ui.glass.HeaderGlassBackdrop
+import com.telvique.phone.ui.glass.LiquidCircularGlassButton
+import com.telvique.phone.ui.glass.LocalHazeState
+import com.telvique.phone.ui.glass.clearLiquidGlassPill
+import com.telvique.phone.ui.icons.ApplePhoneIcons
+import com.telvique.phone.ui.theme.LocalApplePalette
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RecentsScreen(
     callLogs: List<CallLogItem>,
+    favorites: List<ContactItem>,
+    layoutMode: PhoneLayoutMode,
     selectedFilter: RecentsFilter,
-    searchQuery: String,
     blockedNumbers: Set<String>,
+    bottomInsetPadding: Dp,
     onFilterChange: (RecentsFilter) -> Unit,
-    onSearchQueryChange: (String) -> Unit,
+    onLayoutModeChange: (PhoneLayoutMode) -> Unit,
+    onOpenSettings: () -> Unit,
     onCallNumber: (String) -> Unit,
     onDeleteEntry: (Long) -> Unit,
     onClearAll: () -> Unit,
-    onToggleBlock: (String, Boolean) -> Unit
+    onToggleBlock: (String, Boolean) -> Unit,
 ) {
     val context = LocalContext.current
-    var expandedId by remember { mutableStateOf<Long?>(null) }
+    val palette = LocalApplePalette.current
+    val hazeState = LocalHazeState.current
+    val listState = rememberLazyListState()
+    var showFilterMenu by remember { mutableStateOf(false) }
     var showClearDialog by remember { mutableStateOf(false) }
+    var infoTarget by remember { mutableStateOf<CallLogItem?>(null) }
 
-    Column(modifier = Modifier.fillMaxSize()) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically
+    val headerBlurProgress by remember {
+        derivedStateOf {
+            if (listState.firstVisibleItemIndex > 0) 1f
+            else (listState.firstVisibleItemScrollOffset / 90f).coerceIn(0f, 1f)
+        }
+    }
+
+    val isUnified = layoutMode == PhoneLayoutMode.UNIFIED
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(bottom = bottomInsetPadding + 24.dp)
         ) {
-            OutlinedTextField(
-                value = searchQuery,
-                onValueChange = onSearchQueryChange,
-                modifier = Modifier.weight(1f),
-                placeholder = { Text("Search recents") },
-                leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
-                trailingIcon = {
-                    if (searchQuery.isNotEmpty()) {
-                        IconButton(onClick = { onSearchQueryChange("") }) {
-                            Icon(Icons.Rounded.Close, contentDescription = "Clear search")
+            item(key = "recents_header") {
+                AppleLargeHeader(title = if (isUnified) "Calls" else "Recents") {
+                    Box {
+                        LiquidCircularGlassButton(
+                            icon = ApplePhoneIcons.FilterLines,
+                            contentDescription = "Filter & Layout",
+                            onClick = { showFilterMenu = true },
+                            size = 40.dp,
+                            iconSize = 18.dp,
+                            tint = if (selectedFilter != RecentsFilter.ALL) palette.accentBlue else palette.label,
+                            isDark = palette.isDark,
+                        )
+                        DropdownMenu(
+                            expanded = showFilterMenu,
+                            onDismissRequest = { showFilterMenu = false },
+                            containerColor = palette.cardSurface,
+                        ) {
+                            RecentsFilter.entries.forEach { filter ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            text = filter.label,
+                                            color = palette.label,
+                                            fontWeight = if (selectedFilter == filter) FontWeight.SemiBold else FontWeight.Normal
+                                        )
+                                    },
+                                    trailingIcon = if (selectedFilter == filter) {
+                                        {
+                                            Icon(
+                                                imageVector = ApplePhoneIcons.Checkmark,
+                                                contentDescription = null,
+                                                tint = palette.accentBlue,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
+                                    } else null,
+                                    onClick = {
+                                        onFilterChange(filter)
+                                        showFilterMenu = false
+                                    }
+                                )
+                            }
+                            HorizontalDivider(color = palette.separator.copy(alpha = 0.5f))
+                            PhoneLayoutMode.entries.forEach { mode ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            text = "${mode.label} Layout",
+                                            color = palette.label,
+                                            fontWeight = if (layoutMode == mode) FontWeight.SemiBold else FontWeight.Normal
+                                        )
+                                    },
+                                    trailingIcon = if (layoutMode == mode) {
+                                        {
+                                            Icon(
+                                                imageVector = ApplePhoneIcons.Checkmark,
+                                                contentDescription = null,
+                                                tint = palette.accentBlue,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
+                                    } else null,
+                                    onClick = {
+                                        onLayoutModeChange(mode)
+                                        showFilterMenu = false
+                                    }
+                                )
+                            }
+                            if (callLogs.isNotEmpty()) {
+                                HorizontalDivider(color = palette.separator.copy(alpha = 0.5f))
+                                DropdownMenuItem(
+                                    text = {
+                                        Text("Clear All Recents", color = palette.callRed)
+                                    },
+                                    onClick = {
+                                        showFilterMenu = false
+                                        showClearDialog = true
+                                    }
+                                )
+                            }
                         }
                     }
-                },
-                singleLine = true,
-                shape = RoundedCornerShape(16.dp)
-            )
-            if (callLogs.isNotEmpty()) {
-                Spacer(modifier = Modifier.width(6.dp))
-                IconButton(onClick = { showClearDialog = true }) {
-                    Icon(
-                        imageVector = Icons.Rounded.DeleteSweep,
-                        contentDescription = "Clear call history"
-                    )
+
+                    if (isUnified) {
+                        LiquidCircularGlassButton(
+                            icon = ApplePhoneIcons.GearShapeFill,
+                            contentDescription = "Settings",
+                            onClick = onOpenSettings,
+                            size = 40.dp,
+                            iconSize = 18.dp,
+                            tint = palette.label,
+                            isDark = palette.isDark,
+                        )
+                    }
                 }
             }
-        }
 
-        LazyRow(
-            contentPadding = PaddingValues(horizontal = 16.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            items(RecentsFilter.entries) { filter ->
-                FilterChip(
-                    selected = selectedFilter == filter,
-                    onClick = { onFilterChange(filter) },
-                    label = { Text(filter.label) }
-                )
+            // Classic mode shows iOS Segmented Control (All | Missed) right under header
+            if (!isUnified) {
+                item(key = "classic_segmented") {
+                    AppleAllMissedSegmentedControl(
+                        selectedFilter = selectedFilter,
+                        onSelect = onFilterChange,
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                }
             }
-        }
 
-        if (callLogs.isEmpty()) {
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = "No recent calls",
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        } else {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(vertical = 8.dp)
-            ) {
-                items(callLogs, key = { it.id }) { item ->
-                    val isExpanded = expandedId == item.id
-                    val isBlocked = blockedNumbers.any {
-                        it == item.number || PhoneFormatUtils.numbersMatch(it, item.number)
+            // Unified mode pins Favorites strip at the top of Calls
+            if (isUnified && favorites.isNotEmpty()) {
+                item(key = "unified_favorites") {
+                    Column(modifier = Modifier.padding(top = 4.dp, bottom = 10.dp)) {
+                        Text(
+                            text = "Favorites",
+                            color = palette.secondaryLabel,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)
+                        )
+                        LazyRow(
+                            contentPadding = PaddingValues(horizontal = 16.dp),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            items(favorites, key = { "ufav_${it.id}" }) { fav ->
+                                Column(
+                                    modifier = Modifier
+                                        .width(86.dp)
+                                        .clearLiquidGlassPill(
+                                            shape = RoundedCornerShape(20.dp),
+                                            hazeState = hazeState,
+                                            isDark = palette.isDark,
+                                            blurRadius = 8.dp,
+                                            shadowElevation = 3.dp,
+                                        )
+                                        .clickable {
+                                            if (fav.primaryNumber.isNotBlank()) {
+                                                onCallNumber(fav.primaryNumber)
+                                            }
+                                        }
+                                        .padding(horizontal = 8.dp, vertical = 10.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    ContactAvatar(
+                                        name = fav.name,
+                                        photoUri = fav.photoUri,
+                                        size = 48.dp
+                                    )
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Text(
+                                        text = fav.name.substringBefore(' '),
+                                        color = palette.label,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        textAlign = TextAlign.Center,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+                        }
                     }
+                }
+            }
 
-                    CallLogRow(
+            if (callLogs.isEmpty()) {
+                item(key = "empty_recents") {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 120.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(
+                                imageVector = ApplePhoneIcons.ClockFill,
+                                contentDescription = null,
+                                tint = palette.tertiaryLabel,
+                                modifier = Modifier.size(42.dp)
+                            )
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Text(
+                                text = "No Recents",
+                                color = palette.secondaryLabel,
+                                fontSize = 17.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+                }
+            } else {
+                itemsIndexed(callLogs, key = { _, it -> it.id }) { index, item ->
+                    AppleRecentCallRow(
                         item = item,
-                        isExpanded = isExpanded,
-                        isBlocked = isBlocked,
+                        showDivider = index < callLogs.lastIndex,
                         onRowClick = {
-                            expandedId = if (isExpanded) null else item.id
-                        },
-                        onCallClick = {
                             if (item.number.isNotBlank()) onCallNumber(item.number)
                         },
-                        onMessageClick = {
-                            if (item.number.isNotBlank()) openSmsApp(context, item.number)
-                        },
-                        onAddContactClick = {
-                            if (item.number.isNotBlank()) openAddContact(context, item.number)
-                        },
-                        onCopyClick = {
-                            if (item.number.isNotBlank()) copyNumberToClipboard(context, item.number)
-                        },
-                        onBlockToggle = {
-                            if (item.number.isNotBlank()) onToggleBlock(item.number, !isBlocked)
-                        },
-                        onDeleteClick = { onDeleteEntry(item.id) }
+                        onInfoClick = { infoTarget = item }
                     )
                 }
+            }
+        }
+
+        if (headerBlurProgress > 0.05f) {
+            HeaderGlassBackdrop(
+                progress = headerBlurProgress,
+                surfaceColor = palette.background,
+                hazeState = hazeState,
+                height = 56.dp,
+                modifier = Modifier.align(Alignment.TopCenter),
+            )
+        }
+    }
+
+    val activeItem = infoTarget
+    if (activeItem != null) {
+        val isBlocked = blockedNumbers.any {
+            it == activeItem.number || PhoneFormatUtils.numbersMatch(it, activeItem.number)
+        }
+        ModalBottomSheet(
+            onDismissRequest = { infoTarget = null },
+            containerColor = palette.cardSurface,
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 8.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                ContactAvatar(
+                    name = activeItem.displayTitle,
+                    photoUri = activeItem.photoUri,
+                    size = 76.dp
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+                Text(
+                    text = activeItem.displayTitle,
+                    color = palette.label,
+                    fontSize = 24.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+                if (activeItem.number.isNotBlank() && activeItem.number != activeItem.displayTitle) {
+                    Text(
+                        text = activeItem.number,
+                        color = palette.secondaryLabel,
+                        fontSize = 15.sp
+                    )
+                }
+                Spacer(modifier = Modifier.height(6.dp))
+                val subtitle = buildList {
+                    add(PhoneFormatUtils.formatRelativeTime(activeItem.timestamp))
+                    if (activeItem.durationSeconds > 0L) {
+                        add(PhoneFormatUtils.formatDuration(activeItem.durationSeconds))
+                    }
+                    if (!activeItem.simLabel.isNullOrBlank()) {
+                        add(activeItem.simLabel)
+                    }
+                }.joinToString(" • ")
+                Text(
+                    text = subtitle,
+                    color = palette.tertiaryLabel,
+                    fontSize = 13.sp
+                )
+
+                Spacer(modifier = Modifier.height(18.dp))
+
+                // Quick Apple circular action pills
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceEvenly
+                ) {
+                    AppleSheetActionCircle(
+                        icon = ApplePhoneIcons.MessageFill,
+                        label = "message",
+                        tint = palette.accentBlue,
+                        onClick = {
+                            if (activeItem.number.isNotBlank()) openSmsApp(context, activeItem.number)
+                        }
+                    )
+                    AppleSheetActionCircle(
+                        icon = ApplePhoneIcons.PhoneFill,
+                        label = "call",
+                        tint = palette.callGreen,
+                        onClick = {
+                            infoTarget = null
+                            if (activeItem.number.isNotBlank()) onCallNumber(activeItem.number)
+                        }
+                    )
+                    AppleSheetActionCircle(
+                        icon = Icons.Rounded.ContentCopy,
+                        label = "copy",
+                        tint = palette.accentBlue,
+                        onClick = {
+                            if (activeItem.number.isNotBlank()) copyNumberToClipboard(context, activeItem.number)
+                        }
+                    )
+                    if (activeItem.cachedName.isNullOrBlank() && activeItem.number.isNotBlank()) {
+                        AppleSheetActionCircle(
+                            icon = Icons.Rounded.PersonAdd,
+                            label = "save",
+                            tint = palette.accentBlue,
+                            onClick = {
+                                infoTarget = null
+                                openAddContact(context, activeItem.number)
+                            }
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(18.dp))
+
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(palette.tertiaryFill)
+                ) {
+                    if (activeItem.number.isNotBlank()) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    onToggleBlock(activeItem.number, !isBlocked)
+                                    infoTarget = null
+                                }
+                                .padding(horizontal = 16.dp, vertical = 14.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Block,
+                                contentDescription = null,
+                                tint = palette.callRed,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Text(
+                                text = if (isBlocked) "Unblock Caller" else "Block Caller",
+                                color = palette.callRed,
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                        HorizontalDivider(
+                            modifier = Modifier.padding(start = 48.dp),
+                            thickness = 0.5.dp,
+                            color = palette.separator.copy(alpha = 0.5f)
+                        )
+                    }
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                onDeleteEntry(activeItem.id)
+                                infoTarget = null
+                            }
+                            .padding(horizontal = 16.dp, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.DeleteOutline,
+                            contentDescription = null,
+                            tint = palette.callRed,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text(
+                            text = "Delete from Recents",
+                            color = palette.callRed,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(24.dp))
             }
         }
     }
@@ -183,7 +494,10 @@ fun RecentsScreen(
     if (showClearDialog) {
         AlertDialog(
             onDismissRequest = { showClearDialog = false },
-            title = { Text("Clear call history?") },
+            containerColor = palette.cardSurface,
+            titleContentColor = palette.label,
+            textContentColor = palette.secondaryLabel,
+            title = { Text("Clear All Recents?", fontWeight = FontWeight.SemiBold) },
             text = { Text("This removes all recent call entries from your device call log.") },
             confirmButton = {
                 TextButton(
@@ -192,12 +506,12 @@ fun RecentsScreen(
                         onClearAll()
                     }
                 ) {
-                    Text("Clear", color = MaterialTheme.colorScheme.error)
+                    Text("Clear All", color = palette.callRed, fontWeight = FontWeight.SemiBold)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showClearDialog = false }) {
-                    Text("Cancel")
+                    Text("Cancel", color = palette.accentBlue)
                 }
             }
         )
@@ -205,154 +519,193 @@ fun RecentsScreen(
 }
 
 @Composable
-private fun CallLogRow(
-    item: CallLogItem,
-    isExpanded: Boolean,
-    isBlocked: Boolean,
-    onRowClick: () -> Unit,
-    onCallClick: () -> Unit,
-    onMessageClick: () -> Unit,
-    onAddContactClick: () -> Unit,
-    onCopyClick: () -> Unit,
-    onBlockToggle: () -> Unit,
-    onDeleteClick: () -> Unit
+private fun AppleAllMissedSegmentedControl(
+    selectedFilter: RecentsFilter,
+    onSelect: (RecentsFilter) -> Unit,
+    modifier: Modifier = Modifier
 ) {
-    val typeColor = when (item.type) {
-        CallLogType.MISSED, CallLogType.REJECTED -> TelviqueColors.MissedRed
-        CallLogType.INCOMING -> TelviqueColors.IncomingBlue
-        CallLogType.OUTGOING -> TelviqueColors.OutgoingGreen
-        else -> MaterialTheme.colorScheme.onSurfaceVariant
-    }
-
-    val typeIcon: ImageVector = when (item.type) {
-        CallLogType.INCOMING -> Icons.AutoMirrored.Rounded.CallReceived
-        CallLogType.OUTGOING -> Icons.AutoMirrored.Rounded.CallMade
-        CallLogType.MISSED, CallLogType.REJECTED -> Icons.AutoMirrored.Rounded.CallMissed
-        CallLogType.BLOCKED -> Icons.Rounded.Block
-        CallLogType.VOICEMAIL -> Icons.Rounded.Voicemail
-        CallLogType.UNKNOWN -> Icons.Rounded.Call
-    }
-
-    Surface(
-        modifier = Modifier
+    val palette = LocalApplePalette.current
+    val options = listOf(RecentsFilter.ALL, RecentsFilter.MISSED)
+    Row(
+        modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 3.dp)
-            .clip(RoundedCornerShape(16.dp))
-            .clickable(onClick = onRowClick),
-        color = if (isExpanded) {
-            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
-        } else {
-            MaterialTheme.colorScheme.surface
-        }
+            .clip(RoundedCornerShape(12.dp))
+            .background(palette.secondaryFill)
+            .padding(3.dp),
+        horizontalArrangement = Arrangement.spacedBy(3.dp)
     ) {
-        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                ContactAvatar(
-                    name = item.displayTitle,
-                    photoUri = item.photoUri,
-                    size = 44.dp
+        options.forEach { option ->
+            val selected = selectedFilter == option
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(if (selected) palette.cardSurface else Color.Transparent)
+                    .clickable { onSelect(option) }
+                    .padding(vertical = 7.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = option.label,
+                    color = palette.label,
+                    fontSize = 13.sp,
+                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium
                 )
-                Spacer(modifier = Modifier.width(12.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = item.displayTitle,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Medium,
-                        color = if (item.type == CallLogType.MISSED) {
-                            TelviqueColors.MissedRed
-                        } else {
-                            MaterialTheme.colorScheme.onSurface
-                        },
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = typeIcon,
-                            contentDescription = null,
-                            tint = typeColor,
-                            modifier = Modifier.size(14.dp)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        val metaParts = buildList {
-                            add(PhoneFormatUtils.formatRelativeTime(item.timestamp))
-                            if (item.durationSeconds > 0L) {
-                                add(PhoneFormatUtils.formatDuration(item.durationSeconds))
-                            }
-                            if (!item.simLabel.isNullOrBlank()) {
-                                add(item.simLabel)
-                            }
-                        }
-                        Text(
-                            text = metaParts.joinToString(" • "),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                }
-                IconButton(onClick = onCallClick) {
-                    Icon(
-                        imageVector = Icons.Rounded.Call,
-                        contentDescription = "Call ${item.displayTitle}",
-                        tint = TelviqueColors.CallGreen
-                    )
-                }
-            }
-
-            AnimatedVisibility(visible = isExpanded) {
-                Column {
-                    Spacer(modifier = Modifier.height(8.dp))
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceEvenly
-                    ) {
-                        ActionChipButton(Icons.Rounded.ChatBubbleOutline, "Message", onMessageClick)
-                        if (item.cachedName.isNullOrBlank()) {
-                            ActionChipButton(Icons.Rounded.PersonAdd, "Save", onAddContactClick)
-                        }
-                        ActionChipButton(Icons.Rounded.ContentCopy, "Copy", onCopyClick)
-                        ActionChipButton(
-                            Icons.Rounded.Block,
-                            if (isBlocked) "Unblock" else "Block",
-                            onBlockToggle
-                        )
-                        ActionChipButton(Icons.Rounded.DeleteOutline, "Delete", onDeleteClick)
-                    }
-                }
             }
         }
     }
 }
 
 @Composable
-private fun ActionChipButton(
-    icon: ImageVector,
-    label: String,
-    onClick: () -> Unit
+private fun AppleRecentCallRow(
+    item: CallLogItem,
+    showDivider: Boolean,
+    onRowClick: () -> Unit,
+    onInfoClick: () -> Unit
 ) {
+    val palette = LocalApplePalette.current
+    val isMissed = item.type == CallLogType.MISSED || item.type == CallLogType.REJECTED
+
     Column(
         modifier = Modifier
-            .clip(RoundedCornerShape(10.dp))
-            .clickable(onClick = onClick)
-            .padding(horizontal = 8.dp, vertical = 6.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
+            .fillMaxWidth()
+            .clickable(onClick = onRowClick)
     ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = label,
-            modifier = Modifier.size(20.dp),
-            tint = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Spacer(modifier = Modifier.height(2.dp))
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 14.dp, end = 10.dp, top = 10.dp, bottom = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Left outgoing/incoming icon column (matches authentic iOS Recents indentation)
+            Box(
+                modifier = Modifier.width(24.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                when (item.type) {
+                    CallLogType.OUTGOING -> Icon(
+                        imageVector = ApplePhoneIcons.PhoneArrowUpRight,
+                        contentDescription = "Outgoing",
+                        tint = palette.tertiaryLabel,
+                        modifier = Modifier.size(14.dp)
+                    )
+                    CallLogType.INCOMING -> Icon(
+                        imageVector = ApplePhoneIcons.PhoneArrowDownLeft,
+                        contentDescription = "Incoming",
+                        tint = palette.tertiaryLabel,
+                        modifier = Modifier.size(14.dp)
+                    )
+                    else -> Unit
+                }
+            }
+
+            Spacer(modifier = Modifier.width(6.dp))
+
+            ContactAvatar(
+                name = item.displayTitle,
+                photoUri = item.photoUri,
+                size = 38.dp
+            )
+
+            Spacer(modifier = Modifier.width(12.dp))
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = item.displayTitle,
+                    color = if (isMissed) palette.callRed else palette.label,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(modifier = Modifier.height(1.dp))
+                val meta = buildList {
+                    when (item.type) {
+                        CallLogType.MISSED -> add("Missed")
+                        CallLogType.REJECTED -> add("Declined")
+                        CallLogType.BLOCKED -> add("Blocked")
+                        else -> add("mobile")
+                    }
+                    if (!item.simLabel.isNullOrBlank()) add(item.simLabel)
+                    if (item.durationSeconds > 0L) add(PhoneFormatUtils.formatDuration(item.durationSeconds))
+                }.joinToString(" • ")
+
+                Text(
+                    text = meta,
+                    color = palette.secondaryLabel,
+                    fontSize = 13.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+
+            Spacer(modifier = Modifier.width(8.dp))
+
+            Text(
+                text = PhoneFormatUtils.formatAppleRecentTime(item.timestamp),
+                color = palette.secondaryLabel,
+                fontSize = 13.sp,
+                maxLines = 1
+            )
+
+            IconButton(
+                onClick = onInfoClick,
+                modifier = Modifier.size(38.dp)
+            ) {
+                Icon(
+                    imageVector = ApplePhoneIcons.InfoCircle,
+                    contentDescription = "Call Info",
+                    tint = palette.accentBlue,
+                    modifier = Modifier.size(21.dp)
+                )
+            }
+        }
+
+        if (showDivider) {
+            HorizontalDivider(
+                modifier = Modifier.padding(start = 94.dp),
+                thickness = 0.5.dp,
+                color = palette.separator.copy(alpha = 0.5f)
+            )
+        }
+    }
+}
+
+@Composable
+internal fun AppleSheetActionCircle(
+    icon: ImageVector,
+    label: String,
+    tint: Color,
+    onClick: () -> Unit
+) {
+    val palette = LocalApplePalette.current
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier
+            .clip(RoundedCornerShape(14.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 8.dp, vertical = 4.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(52.dp)
+                .clip(CircleShape)
+                .background(palette.tertiaryFill),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = label,
+                tint = tint,
+                modifier = Modifier.size(22.dp)
+            )
+        }
+        Spacer(modifier = Modifier.height(5.dp))
         Text(
             text = label,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+            color = tint,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Medium
         )
     }
 }

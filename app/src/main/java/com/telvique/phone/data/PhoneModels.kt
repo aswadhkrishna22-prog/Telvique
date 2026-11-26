@@ -46,6 +46,11 @@ data class CallLogItem(
         get() = cachedName?.takeIf { it.isNotBlank() } ?: number.ifBlank { "Private Number" }
 }
 
+enum class PhoneLayoutMode(val label: String) {
+    UNIFIED("Unified"),
+    CLASSIC("Classic")
+}
+
 enum class RecentsFilter(val label: String) {
     ALL("All"),
     MISSED("Missed"),
@@ -112,6 +117,20 @@ object PhoneFormatUtils {
             sameYear && dayDiff == 1 -> "Yesterday, ${timeFormat.format(Date(timestampMillis))}"
             sameYear -> SimpleDateFormat("MMM d, h:mm a", Locale.getDefault()).format(Date(timestampMillis))
             else -> SimpleDateFormat("MMM d, yyyy", Locale.getDefault()).format(Date(timestampMillis))
+        }
+    }
+
+    fun formatAppleRecentTime(timestampMillis: Long, nowMillis: Long = System.currentTimeMillis()): String {
+        val target = Calendar.getInstance().apply { timeInMillis = timestampMillis }
+        val now = Calendar.getInstance().apply { timeInMillis = nowMillis }
+        val sameYear = target.get(Calendar.YEAR) == now.get(Calendar.YEAR)
+        val dayDiff = now.get(Calendar.DAY_OF_YEAR) - target.get(Calendar.DAY_OF_YEAR)
+
+        return when {
+            sameYear && dayDiff == 0 -> SimpleDateFormat("h:mm a", Locale.getDefault()).format(Date(timestampMillis))
+            sameYear && dayDiff == 1 -> "Yesterday"
+            sameYear && dayDiff in 2..6 -> SimpleDateFormat("EEEE", Locale.getDefault()).format(Date(timestampMillis))
+            else -> SimpleDateFormat("MM/dd/yy", Locale.getDefault()).format(Date(timestampMillis))
         }
     }
 }

@@ -13,23 +13,26 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Call
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.SimCard
 import androidx.compose.material.icons.rounded.WarningAmber
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -38,25 +41,34 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import com.telvique.phone.data.SimAccountInfo
+import com.telvique.phone.ui.glass.LocalHazeState
+import com.telvique.phone.ui.glass.clearLiquidGlassPill
+import com.telvique.phone.ui.icons.ApplePhoneIcons
+import com.telvique.phone.ui.theme.LocalApplePalette
 import kotlin.math.absoluteValue
 
-private val AvatarPalette = listOf(
-    Color(0xFF2563EB),
-    Color(0xFF0D9488),
-    Color(0xFF7C3AED),
-    Color(0xFFDB2777),
-    Color(0xFFD97706),
-    Color(0xFF059669),
-    Color(0xFF4F46E5)
+private val AppleAvatarGradients = listOf(
+    Color(0xFF9EA5B1) to Color(0xFF7D838F),
+    Color(0xFF5AC8FA) to Color(0xFF007AFF),
+    Color(0xFF64D2FF) to Color(0xFF5E5CE6),
+    Color(0xFF34C759) to Color(0xFF00A86B),
+    Color(0xFFFF9F0A) to Color(0xFFFF6B00),
+    Color(0xFFFF6482) to Color(0xFFFF2D55),
+    Color(0xFFBF5AF2) to Color(0xFF8944AB),
 )
+
+fun posterColorsForName(name: String): Pair<Color, Color> =
+    AppleAvatarGradients[(name.hashCode().absoluteValue) % AppleAvatarGradients.size]
 
 @Composable
 fun ContactAvatar(
@@ -65,14 +77,19 @@ fun ContactAvatar(
     size: Dp = 44.dp,
     modifier: Modifier = Modifier
 ) {
-    val bgColor = AvatarPalette[(name.hashCode().absoluteValue) % AvatarPalette.size]
-    val initial = name.trim().firstOrNull()?.uppercaseChar()?.toString()
+    val (topColor, bottomColor) = posterColorsForName(name)
+    val words = name.trim().split(' ').filter { it.isNotBlank() }
+    val initials = when {
+        words.size >= 2 -> "${words.first().first().uppercaseChar()}${words.last().first().uppercaseChar()}"
+        words.size == 1 && words.first().first().isLetter() -> words.first().first().uppercaseChar().toString()
+        else -> null
+    }
 
     Box(
         modifier = modifier
             .size(size)
             .clip(CircleShape)
-            .background(bgColor.copy(alpha = 0.16f)),
+            .background(Brush.verticalGradient(listOf(topColor, bottomColor))),
         contentAlignment = Alignment.Center
     ) {
         if (!photoUri.isNullOrBlank()) {
@@ -82,25 +99,52 @@ fun ContactAvatar(
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize()
             )
-        } else if (initial != null && initial.first().isLetter()) {
+        } else if (!initials.isNullOrBlank()) {
             Text(
-                text = initial,
-                color = bgColor,
-                style = if (size >= 64.dp) {
-                    MaterialTheme.typography.headlineMedium
-                } else {
-                    MaterialTheme.typography.titleMedium
-                },
-                fontWeight = FontWeight.SemiBold
+                text = initials,
+                color = Color.White,
+                fontSize = (size.value * 0.38f).sp,
+                fontWeight = FontWeight.SemiBold,
+                letterSpacing = 0.5.sp
             )
         } else {
             Icon(
                 imageVector = Icons.Rounded.Person,
                 contentDescription = name,
-                tint = bgColor,
-                modifier = Modifier.size(size * 0.52f)
+                tint = Color.White,
+                modifier = Modifier.size(size * 0.56f)
             )
         }
+    }
+}
+
+@Composable
+fun AppleLargeHeader(
+    title: String,
+    modifier: Modifier = Modifier,
+    actions: @Composable RowScope.() -> Unit = {},
+) {
+    val palette = LocalApplePalette.current
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .windowInsetsPadding(WindowInsets.statusBars)
+            .padding(start = 20.dp, end = 16.dp, top = 12.dp, bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = title,
+            color = palette.label,
+            fontSize = 34.sp,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = (-0.5).sp,
+            modifier = Modifier.weight(1f),
+        )
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            content = actions,
+        )
     }
 }
 
@@ -112,56 +156,67 @@ fun SetupPromptBanner(
     onRequestPermissions: () -> Unit
 ) {
     if (isDefaultDialer && missingPermissionsCount == 0) return
+    val palette = LocalApplePalette.current
+    val hazeState = LocalHazeState.current
 
-    Card(
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f)
-        )
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(
-                imageVector = Icons.Rounded.WarningAmber,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary
+            .padding(horizontal = 16.dp, vertical = 6.dp)
+            .clearLiquidGlassPill(
+                shape = RoundedCornerShape(18.dp),
+                hazeState = hazeState,
+                isDark = palette.isDark,
+                blurRadius = 10.dp,
+                shadowElevation = 4.dp,
             )
-            Spacer(modifier = Modifier.width(12.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = if (!isDefaultDialer) {
-                        "Set Telvique as default phone app"
-                    } else {
-                        "Permissions needed ($missingPermissionsCount)"
-                    },
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold
-                )
-                Text(
-                    text = if (!isDefaultDialer) {
-                        "Required to handle incoming & outgoing calls."
-                    } else {
-                        "Grant contacts, call log, and phone permissions."
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-            Spacer(modifier = Modifier.width(8.dp))
-            Button(
-                onClick = if (!isDefaultDialer) onSetDefaultDialer else onRequestPermissions
-            ) {
-                Text(if (!isDefaultDialer) "Set Default" else "Allow")
-            }
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            imageVector = Icons.Rounded.WarningAmber,
+            contentDescription = null,
+            tint = palette.accentBlue,
+            modifier = Modifier.size(22.dp)
+        )
+        Spacer(modifier = Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = if (!isDefaultDialer) {
+                    "Set Telvique as Default Phone"
+                } else {
+                    "Permissions needed ($missingPermissionsCount)"
+                },
+                color = palette.label,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                text = if (!isDefaultDialer) {
+                    "Required for incoming & outgoing calls."
+                } else {
+                    "Allow contacts, call log, and phone access."
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = palette.secondaryLabel,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        Spacer(modifier = Modifier.width(8.dp))
+        Button(
+            onClick = if (!isDefaultDialer) onSetDefaultDialer else onRequestPermissions,
+            shape = CircleShape,
+            colors = ButtonDefaults.buttonColors(
+                containerColor = palette.accentBlue,
+                contentColor = Color.White
+            )
+        ) {
+            Text(
+                text = if (!isDefaultDialer) "Set Default" else "Allow",
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 13.sp
+            )
         }
     }
 }
@@ -173,48 +228,55 @@ fun SimPickerDialog(
     onSelectSim: (SimAccountInfo) -> Unit,
     onDismiss: () -> Unit
 ) {
+    val palette = LocalApplePalette.current
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Choose SIM for call") },
+        containerColor = palette.cardSurface,
+        titleContentColor = palette.label,
+        textContentColor = palette.secondaryLabel,
+        title = { Text("Choose Calling Line", fontWeight = FontWeight.SemiBold) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
                     text = number,
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = palette.secondaryLabel
                 )
+                Spacer(modifier = Modifier.height(2.dp))
                 sims.forEachIndexed { index, sim ->
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(palette.tertiaryFill)
                             .clickable { onSelectSim(sim) }
-                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f))
                             .padding(horizontal = 14.dp, vertical = 12.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Icon(
                             imageVector = Icons.Rounded.SimCard,
                             contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary
+                            tint = palette.accentBlue
                         )
                         Spacer(modifier = Modifier.width(12.dp))
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 text = sim.label,
+                                color = palette.label,
                                 style = MaterialTheme.typography.titleSmall,
                                 fontWeight = FontWeight.Medium
                             )
                             Text(
                                 text = "SIM ${index + 1}",
                                 style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                color = palette.secondaryLabel
                             )
                         }
                         Icon(
-                            imageVector = Icons.Rounded.Call,
+                            imageVector = ApplePhoneIcons.PhoneFill,
                             contentDescription = "Call",
-                            tint = MaterialTheme.colorScheme.primary
+                            tint = palette.callGreen,
+                            modifier = Modifier.size(18.dp)
                         )
                     }
                 }
@@ -223,7 +285,7 @@ fun SimPickerDialog(
         confirmButton = {},
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("Cancel")
+                Text("Cancel", color = palette.accentBlue, fontWeight = FontWeight.SemiBold)
             }
         }
     )

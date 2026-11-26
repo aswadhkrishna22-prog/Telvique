@@ -9,6 +9,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -26,26 +28,15 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.VolumeUp
 import androidx.compose.material.icons.rounded.AddIcCall
 import androidx.compose.material.icons.rounded.BluetoothAudio
-import androidx.compose.material.icons.rounded.Call
-import androidx.compose.material.icons.rounded.CallEnd
 import androidx.compose.material.icons.rounded.CallMerge
-import androidx.compose.material.icons.rounded.Dialpad
 import androidx.compose.material.icons.rounded.Headset
-import androidx.compose.material.icons.rounded.Message
-import androidx.compose.material.icons.rounded.Mic
-import androidx.compose.material.icons.rounded.MicOff
-import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PhoneInTalk
-import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.SwapCalls
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -58,15 +49,24 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import coil3.compose.AsyncImage
+import com.kyant.backdrop.Backdrop
+import com.kyant.backdrop.backdrops.layerBackdrop
+import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import com.telvique.phone.MainActivity
 import com.telvique.phone.TelviqueApp
 import com.telvique.phone.data.PhoneFormatUtils
@@ -77,6 +77,11 @@ import com.telvique.phone.telecom.CallPhase
 import com.telvique.phone.telecom.CallUiItem
 import com.telvique.phone.telecom.TelecomUiState
 import com.telvique.phone.ui.components.ContactAvatar
+import com.telvique.phone.ui.components.posterColorsForName
+import com.telvique.phone.ui.glass.backdropLiquidGlass
+import com.telvique.phone.ui.glass.isBackdropGlassCapable
+import com.telvique.phone.ui.glass.liquidBubbleHighlight
+import com.telvique.phone.ui.icons.ApplePhoneIcons
 import com.telvique.phone.ui.theme.TelviqueColors
 import com.telvique.phone.ui.theme.TelviqueTheme
 import kotlinx.coroutines.delay
@@ -102,7 +107,7 @@ class CallActivity : ComponentActivity() {
         val settingsFlow = (application as TelviqueApp).settingsRepository.settingsFlow
 
         setContent {
-            TelviqueTheme {
+            TelviqueTheme(darkTheme = true, forceDarkSystemBars = true) {
                 val telecomState by CallManager.uiState.collectAsStateWithLifecycle()
                 val settings by settingsFlow.collectAsStateWithLifecycle(initialValue = TelviqueSettings())
 
@@ -134,12 +139,8 @@ class CallActivity : ComponentActivity() {
                         }
                         startActivity(intent)
                     },
-                    onPlayDtmf = { digit, id ->
-                        CallManager.playDtmf(digit, id)
-                    },
-                    onStopDtmf = { id ->
-                        CallManager.stopDtmf(id)
-                    }
+                    onPlayDtmf = { digit, id -> CallManager.playDtmf(digit, id) },
+                    onStopDtmf = { id -> CallManager.stopDtmf(id) }
                 )
             }
         }
@@ -185,10 +186,61 @@ private fun CallScreen(
         }
     }
 
-    Surface(
-        modifier = Modifier.fillMaxSize(),
-        color = MaterialTheme.colorScheme.background
-    ) {
+    val glassCapable = isBackdropGlassCapable()
+    val posterBackdrop = if (glassCapable) {
+        rememberLayerBackdrop {
+            drawRect(Color(0xFF0A0B0E))
+            drawContent()
+        }
+    } else null
+
+    val posterName = primary?.displayName ?: "Telvique"
+    val (posterTop, posterBottom) = posterColorsForName(posterName)
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        // Layer 1: Full-bleed Apple Contact Poster atmospheric background (captured by Kyant Backdrop!)
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .then(if (posterBackdrop != null) Modifier.layerBackdrop(posterBackdrop) else Modifier)
+                .background(
+                    Brush.verticalGradient(
+                        listOf(
+                            posterTop.copy(alpha = 0.72f),
+                            posterBottom.copy(alpha = 0.56f),
+                            Color(0xFF0D1017),
+                            Color(0xFF050608),
+                        )
+                    )
+                )
+        ) {
+            if (!primary?.photoUri.isNullOrBlank()) {
+                AsyncImage(
+                    model = primary?.photoUri,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .alpha(0.48f)
+                        .blur(48.dp)
+                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(
+                                    Color.Black.copy(alpha = 0.35f),
+                                    Color.Black.copy(alpha = 0.45f),
+                                    Color.Black.copy(alpha = 0.78f),
+                                )
+                            )
+                        )
+                )
+            }
+        }
+
+        // Layer 2: Interactive Liquid Glass Controls & Caller Poster UI
         if (primary == null) {
             Box(
                 modifier = Modifier
@@ -197,191 +249,239 @@ private fun CallScreen(
                 contentAlignment = Alignment.Center
             ) {
                 Text(
-                    text = "Call ended",
-                    style = MaterialTheme.typography.titleLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    text = "Call Ended",
+                    color = Color.White.copy(alpha = 0.75f),
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Medium
                 )
             }
-            return@Surface
-        }
-
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .safeDrawingPadding()
-                .padding(horizontal = 24.dp, vertical = 20.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            if (secondary != null) {
-                SecondaryCallCard(
-                    call = secondary,
-                    onSwap = onSwapCalls,
-                    onDisconnect = { onDisconnect(secondary.id) }
-                )
-                Spacer(modifier = Modifier.height(12.dp))
-            }
-
-            if (!primary.simLabel.isNullOrBlank()) {
-                Surface(
-                    shape = RoundedCornerShape(50),
-                    color = MaterialTheme.colorScheme.surfaceVariant
-                ) {
-                    Text(
-                        text = primary.simLabel,
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+        } else {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .safeDrawingPadding()
+                    .padding(horizontal = 24.dp, vertical = 18.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                if (secondary != null) {
+                    SecondaryCallGlassCard(
+                        call = secondary,
+                        backdrop = posterBackdrop,
+                        onSwap = onSwapCalls,
+                        onDisconnect = { onDisconnect(secondary.id) }
                     )
+                    Spacer(modifier = Modifier.height(10.dp))
                 }
-                Spacer(modifier = Modifier.height(14.dp))
-            } else {
-                Spacer(modifier = Modifier.height(22.dp))
-            }
 
-            ContactAvatar(
-                name = primary.displayName,
-                photoUri = primary.photoUri,
-                size = 96.dp
-            )
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            Text(
-                text = primary.displayName,
-                style = MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.SemiBold,
-                textAlign = TextAlign.Center,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis
-            )
-
-            if (primary.number.isNotBlank() && primary.number != primary.displayName) {
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = primary.number,
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            val statusText = when (primary.phase) {
-                CallPhase.NEW, CallPhase.DIALING -> "Dialing..."
-                CallPhase.RINGING -> "Incoming call"
-                CallPhase.HOLDING -> "On hold"
-                CallPhase.ACTIVE -> PhoneFormatUtils.formatTimer(elapsedSeconds)
-                CallPhase.DISCONNECTING -> "Ending call..."
-                CallPhase.DISCONNECTED -> primary.disconnectCauseLabel ?: "Call ended"
-            }
-
-            Text(
-                text = statusText,
-                style = MaterialTheme.typography.titleMedium,
-                color = if (primary.phase == CallPhase.ACTIVE) {
-                    MaterialTheme.colorScheme.primary
+                // SIM line badge
+                if (!primary.simLabel.isNullOrBlank()) {
+                    Box(
+                        modifier = Modifier
+                            .backdropLiquidGlass(
+                                backdrop = posterBackdrop,
+                                shape = CircleShape,
+                                isDark = true,
+                                interactive = false,
+                                scrimAlpha = 0.25f,
+                                fallbackTint = Color.White.copy(alpha = 0.14f)
+                            )
+                            .padding(horizontal = 14.dp, vertical = 5.dp)
+                    ) {
+                        Text(
+                            text = primary.simLabel,
+                            color = Color.White.copy(alpha = 0.9f),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(14.dp))
                 } else {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                }
-            )
-
-            Spacer(modifier = Modifier.weight(1f))
-
-            if (primary.phase == CallPhase.RINGING) {
-                OutlinedButton(onClick = { showSmsSheet = true }) {
-                    Icon(
-                        imageVector = Icons.Rounded.Message,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Message")
+                    Spacer(modifier = Modifier.height(20.dp))
                 }
 
-                Spacer(modifier = Modifier.height(28.dp))
+                // Status / Live tabular timer above Caller Name (iOS Contact Poster style)
+                val statusText = when (primary.phase) {
+                    CallPhase.NEW, CallPhase.DIALING -> "calling..."
+                    CallPhase.RINGING -> "Incoming Call"
+                    CallPhase.HOLDING -> "On Hold"
+                    CallPhase.ACTIVE -> PhoneFormatUtils.formatTimer(elapsedSeconds)
+                    CallPhase.DISCONNECTING -> "ending..."
+                    CallPhase.DISCONNECTED -> primary.disconnectCauseLabel ?: "Call Ended"
+                }
 
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(bottom = 24.dp),
-                    horizontalArrangement = Arrangement.SpaceEvenly,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    RoundCallButton(
-                        icon = Icons.Rounded.CallEnd,
-                        label = "Decline",
-                        containerColor = TelviqueColors.CallRed,
-                        onClick = { onDecline(primary.id) }
+                Text(
+                    text = statusText,
+                    style = TextStyle(
+                        color = Color.White.copy(alpha = 0.85f),
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.Medium,
+                        fontFeatureSettings = "tnum"
                     )
-                    RoundCallButton(
-                        icon = Icons.Rounded.Call,
-                        label = "Answer",
-                        containerColor = TelviqueColors.CallGreen,
-                        onClick = { onAnswer(primary.id) }
+                )
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                Text(
+                    text = primary.displayName,
+                    color = Color.White,
+                    fontSize = 34.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = (-0.5).sp,
+                    textAlign = TextAlign.Center,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+
+                if (primary.number.isNotBlank() && primary.number != primary.displayName) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = primary.number,
+                        color = Color.White.copy(alpha = 0.72f),
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Normal
                     )
                 }
-            } else {
-                AnimatedVisibility(visible = showKeypad) {
-                    InCallDtmfKeypad(
-                        digitsEntered = dtmfDigits,
-                        onDigitClick = { digit ->
-                            dtmfDigits += digit
-                            onPlayDtmf(digit, primary.id)
-                        },
-                        onDigitReleased = { onStopDtmf(primary.id) },
-                        onHide = { showKeypad = false }
-                    )
-                }
+
+                Spacer(modifier = Modifier.height(22.dp))
 
                 if (!showKeypad) {
-                    InCallControlsGrid(
-                        primary = primary,
-                        hasSecondaryCall = secondary != null,
-                        audioState = telecomState.audioState,
-                        showKeypad = showKeypad,
-                        onToggleMute = onToggleMute,
-                        onToggleKeypad = { showKeypad = !showKeypad },
-                        onAudioClick = {
-                            val hasExtraRoutes =
-                                (telecomState.audioState.supportedRouteMask and CallAudioState.ROUTE_BLUETOOTH) != 0 ||
-                                    (telecomState.audioState.supportedRouteMask and CallAudioState.ROUTE_WIRED_HEADSET) != 0
-                            if (hasExtraRoutes) {
-                                showAudioRouteSheet = true
-                            } else {
-                                onToggleSpeaker()
-                            }
-                        },
-                        onToggleHold = { onToggleHold(primary.id) },
-                        onAddCall = onAddCall,
-                        onSwapCalls = onSwapCalls,
-                        onMergeCalls = onMergeCalls
+                    ContactAvatar(
+                        name = primary.displayName,
+                        photoUri = primary.photoUri,
+                        size = 104.dp
                     )
                 }
 
-                Spacer(modifier = Modifier.height(28.dp))
+                Spacer(modifier = Modifier.weight(1f))
 
-                RoundCallButton(
-                    icon = Icons.Rounded.CallEnd,
-                    label = "End",
-                    containerColor = TelviqueColors.CallRed,
-                    onClick = { onDisconnect(primary.id) }
-                )
+                if (primary.phase == CallPhase.RINGING) {
+                    // Quick SMS pill
+                    Row(
+                        modifier = Modifier
+                            .backdropLiquidGlass(
+                                backdrop = posterBackdrop,
+                                shape = CircleShape,
+                                isDark = true,
+                                interactive = true,
+                                pressedScale = 1.05f,
+                                scrimAlpha = 0.24f,
+                                fallbackTint = Color.White.copy(alpha = 0.16f)
+                            )
+                            .clip(CircleShape)
+                            .clickable { showSmsSheet = true }
+                            .padding(horizontal = 20.dp, vertical = 11.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = ApplePhoneIcons.MessageFill,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Message",
+                            color = Color.White,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
 
-                Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(modifier = Modifier.height(34.dp))
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 26.dp),
+                        horizontalArrangement = Arrangement.SpaceEvenly,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        AppleSolidCallCircle(
+                            icon = ApplePhoneIcons.PhoneDownFill,
+                            label = "Decline",
+                            containerColor = TelviqueColors.CallRed,
+                            onClick = { onDecline(primary.id) }
+                        )
+                        AppleSolidCallCircle(
+                            icon = ApplePhoneIcons.PhoneFill,
+                            label = "Accept",
+                            containerColor = TelviqueColors.CallGreen,
+                            onClick = { onAnswer(primary.id) }
+                        )
+                    }
+                } else {
+                    AnimatedVisibility(
+                        visible = showKeypad,
+                        enter = fadeIn(),
+                        exit = fadeOut()
+                    ) {
+                        AppleInCallDtmfKeypad(
+                            digitsEntered = dtmfDigits,
+                            backdrop = posterBackdrop,
+                            onDigitClick = { digit ->
+                                dtmfDigits += digit
+                                onPlayDtmf(digit, primary.id)
+                            },
+                            onDigitReleased = { onStopDtmf(primary.id) },
+                            onHide = { showKeypad = false }
+                        )
+                    }
+
+                    if (!showKeypad) {
+                        AppleInCallControlsGrid(
+                            primary = primary,
+                            hasSecondaryCall = secondary != null,
+                            audioState = telecomState.audioState,
+                            showKeypad = showKeypad,
+                            backdrop = posterBackdrop,
+                            onToggleMute = onToggleMute,
+                            onToggleKeypad = { showKeypad = !showKeypad },
+                            onAudioClick = {
+                                val hasExtraRoutes =
+                                    (telecomState.audioState.supportedRouteMask and CallAudioState.ROUTE_BLUETOOTH) != 0 ||
+                                        (telecomState.audioState.supportedRouteMask and CallAudioState.ROUTE_WIRED_HEADSET) != 0
+                                if (hasExtraRoutes) {
+                                    showAudioRouteSheet = true
+                                } else {
+                                    onToggleSpeaker()
+                                }
+                            },
+                            onToggleHold = { onToggleHold(primary.id) },
+                            onAddCall = onAddCall,
+                            onSwapCalls = onSwapCalls,
+                            onMergeCalls = onMergeCalls
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(30.dp))
+
+                    AppleSolidCallCircle(
+                        icon = ApplePhoneIcons.PhoneDownFill,
+                        label = "End",
+                        containerColor = TelviqueColors.CallRed,
+                        onClick = { onDisconnect(primary.id) }
+                    )
+
+                    Spacer(modifier = Modifier.height(18.dp))
+                }
             }
         }
     }
 
     if (showSmsSheet && primary != null) {
-        ModalBottomSheet(onDismissRequest = { showSmsSheet = false }) {
+        ModalBottomSheet(
+            onDismissRequest = { showSmsSheet = false },
+            containerColor = Color(0xFF1C1C1E)
+        ) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 20.dp, vertical = 12.dp)
             ) {
                 Text(
-                    text = "Decline with message",
-                    style = MaterialTheme.typography.titleMedium,
+                    text = "Decline with Message",
+                    color = Color.White,
+                    fontSize = 18.sp,
                     fontWeight = FontWeight.SemiBold
                 )
                 Spacer(modifier = Modifier.height(12.dp))
@@ -395,11 +495,12 @@ private fun CallScreen(
                                 showSmsSheet = false
                                 onRejectWithSms(msg, primary.id)
                             },
-                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+                        color = Color(0xFF2C2C2E)
                     ) {
                         Text(
                             text = msg,
-                            style = MaterialTheme.typography.bodyLarge,
+                            color = Color.White,
+                            fontSize = 16.sp,
                             modifier = Modifier.padding(14.dp)
                         )
                     }
@@ -411,7 +512,10 @@ private fun CallScreen(
 
     if (showAudioRouteSheet) {
         val audio = telecomState.audioState
-        ModalBottomSheet(onDismissRequest = { showAudioRouteSheet = false }) {
+        ModalBottomSheet(
+            onDismissRequest = { showAudioRouteSheet = false },
+            containerColor = Color(0xFF1C1C1E)
+        ) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -419,8 +523,9 @@ private fun CallScreen(
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Text(
-                    text = "Audio output",
-                    style = MaterialTheme.typography.titleMedium,
+                    text = "Audio",
+                    color = Color.White,
+                    fontSize = 18.sp,
                     fontWeight = FontWeight.SemiBold
                 )
                 if ((audio.supportedRouteMask and CallAudioState.ROUTE_BLUETOOTH) != 0) {
@@ -447,7 +552,7 @@ private fun CallScreen(
                 }
                 AudioRouteRow(
                     icon = Icons.Rounded.PhoneInTalk,
-                    label = "Phone Earpiece",
+                    label = "iPhone / Earpiece",
                     selected = audio.route == CallAudioState.ROUTE_EARPIECE,
                     onClick = {
                         onSelectAudioRoute(CallAudioState.ROUTE_EARPIECE)
@@ -455,7 +560,7 @@ private fun CallScreen(
                     }
                 )
                 AudioRouteRow(
-                    icon = Icons.AutoMirrored.Rounded.VolumeUp,
+                    icon = ApplePhoneIcons.SpeakerWave3Fill,
                     label = "Speaker",
                     selected = audio.route == CallAudioState.ROUTE_SPEAKER,
                     onClick = {
@@ -470,50 +575,57 @@ private fun CallScreen(
 }
 
 @Composable
-private fun SecondaryCallCard(
+private fun SecondaryCallGlassCard(
     call: CallUiItem,
+    backdrop: Backdrop?,
     onSwap: () -> Unit,
     onDisconnect: () -> Unit
 ) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .backdropLiquidGlass(
+                backdrop = backdrop,
+                shape = RoundedCornerShape(18.dp),
+                isDark = true,
+                interactive = false,
+                scrimAlpha = 0.28f,
+                fallbackTint = Color.White.copy(alpha = 0.14f)
+            )
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = call.displayName,
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Text(
-                    text = if (call.phase == CallPhase.HOLDING) "On hold" else "Other call",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            TextButton(onClick = onSwap) {
-                Text("Swap")
-            }
-            TextButton(onClick = onDisconnect) {
-                Text("End", color = MaterialTheme.colorScheme.error)
-            }
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = call.displayName,
+                color = Color.White,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = if (call.phase == CallPhase.HOLDING) "On Hold" else "Other Call",
+                color = Color.White.copy(alpha = 0.72f),
+                fontSize = 12.sp
+            )
+        }
+        TextButton(onClick = onSwap) {
+            Text("Swap", color = TelviqueColors.AppleBlueDark, fontWeight = FontWeight.SemiBold)
+        }
+        TextButton(onClick = onDisconnect) {
+            Text("End", color = TelviqueColors.CallRed, fontWeight = FontWeight.SemiBold)
         }
     }
 }
 
 @Composable
-private fun InCallControlsGrid(
+private fun AppleInCallControlsGrid(
     primary: CallUiItem,
     hasSecondaryCall: Boolean,
     audioState: CallAudioUiState,
     showKeypad: Boolean,
+    backdrop: Backdrop?,
     onToggleMute: () -> Unit,
     onToggleKeypad: () -> Unit,
     onAudioClick: () -> Unit,
@@ -525,40 +637,44 @@ private fun InCallControlsGrid(
     val audioIcon = when (audioState.route) {
         CallAudioState.ROUTE_BLUETOOTH -> Icons.Rounded.BluetoothAudio
         CallAudioState.ROUTE_WIRED_HEADSET -> Icons.Rounded.Headset
-        else -> Icons.AutoMirrored.Rounded.VolumeUp
+        else -> ApplePhoneIcons.SpeakerWave3Fill
     }
     val audioLabel = when (audioState.route) {
-        CallAudioState.ROUTE_BLUETOOTH -> "Bluetooth"
-        CallAudioState.ROUTE_WIRED_HEADSET -> "Headset"
-        else -> "Speaker"
+        CallAudioState.ROUTE_BLUETOOTH -> "bluetooth"
+        CallAudioState.ROUTE_WIRED_HEADSET -> "headset"
+        else -> "speaker"
     }
     val audioActive = audioState.route != CallAudioState.ROUTE_EARPIECE
 
     Column(
         modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(18.dp)
+        verticalArrangement = Arrangement.spacedBy(20.dp)
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceEvenly
         ) {
-            CallControlTile(
-                icon = if (audioState.isMuted) Icons.Rounded.MicOff else Icons.Rounded.Mic,
-                label = if (audioState.isMuted) "Unmute" else "Mute",
-                active = audioState.isMuted,
-                onClick = onToggleMute
-            )
-            CallControlTile(
-                icon = Icons.Rounded.Dialpad,
-                label = "Keypad",
-                active = showKeypad,
-                onClick = onToggleKeypad
-            )
-            CallControlTile(
+            LiquidCallControlTile(
                 icon = audioIcon,
                 label = audioLabel,
                 active = audioActive,
+                backdrop = backdrop,
                 onClick = onAudioClick
+            )
+            LiquidCallControlTile(
+                icon = if (primary.phase == CallPhase.HOLDING) ApplePhoneIcons.PlayFill else ApplePhoneIcons.PauseFill,
+                label = if (primary.phase == CallPhase.HOLDING) "resume" else "hold",
+                active = primary.phase == CallPhase.HOLDING,
+                enabled = primary.canHold,
+                backdrop = backdrop,
+                onClick = onToggleHold
+            )
+            LiquidCallControlTile(
+                icon = if (audioState.isMuted) ApplePhoneIcons.MicSlashFill else ApplePhoneIcons.MicFill,
+                label = "mute",
+                active = audioState.isMuted,
+                backdrop = backdrop,
+                onClick = onToggleMute
             )
         }
 
@@ -566,128 +682,144 @@ private fun InCallControlsGrid(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceEvenly
         ) {
-            CallControlTile(
-                icon = if (primary.phase == CallPhase.HOLDING) Icons.Rounded.PlayArrow else Icons.Rounded.Pause,
-                label = if (primary.phase == CallPhase.HOLDING) "Resume" else "Hold",
-                active = primary.phase == CallPhase.HOLDING,
-                enabled = primary.canHold,
-                onClick = onToggleHold
-            )
             if (hasSecondaryCall && primary.canMerge) {
-                CallControlTile(
+                LiquidCallControlTile(
                     icon = Icons.Rounded.CallMerge,
-                    label = "Merge",
+                    label = "merge",
                     active = false,
+                    backdrop = backdrop,
                     onClick = onMergeCalls
                 )
             } else {
-                CallControlTile(
+                LiquidCallControlTile(
                     icon = Icons.Rounded.AddIcCall,
-                    label = "Add call",
+                    label = "add call",
                     active = false,
+                    backdrop = backdrop,
                     onClick = onAddCall
                 )
             }
+            LiquidCallControlTile(
+                icon = ApplePhoneIcons.KeypadDots,
+                label = "keypad",
+                active = showKeypad,
+                backdrop = backdrop,
+                onClick = onToggleKeypad
+            )
             if (hasSecondaryCall) {
-                CallControlTile(
+                LiquidCallControlTile(
                     icon = Icons.Rounded.SwapCalls,
-                    label = "Swap",
+                    label = "swap",
                     active = false,
+                    backdrop = backdrop,
                     onClick = onSwapCalls
                 )
             } else {
-                Spacer(modifier = Modifier.size(76.dp))
+                Spacer(modifier = Modifier.width(84.dp))
             }
         }
     }
 }
 
 @Composable
-private fun CallControlTile(
+private fun LiquidCallControlTile(
     icon: ImageVector,
     label: String,
     active: Boolean,
     enabled: Boolean = true,
+    backdrop: Backdrop?,
     onClick: () -> Unit
 ) {
     Column(
         modifier = Modifier.width(84.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Surface(
-            modifier = Modifier
-                .size(62.dp)
+        val circleModifier = when {
+            !enabled -> Modifier
+                .size(72.dp)
                 .clip(CircleShape)
-                .clickable(enabled = enabled, onClick = onClick),
-            shape = CircleShape,
-            color = when {
-                !enabled -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
-                active -> MaterialTheme.colorScheme.primary
-                else -> MaterialTheme.colorScheme.surfaceVariant
-            }
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = label,
-                    tint = when {
-                        !enabled -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
-                        active -> MaterialTheme.colorScheme.onPrimary
-                        else -> MaterialTheme.colorScheme.onSurface
-                    }
+                .background(Color.White.copy(alpha = 0.08f), CircleShape)
+            active -> Modifier
+                .size(72.dp)
+                .clip(CircleShape)
+                .background(Color.White, CircleShape)
+                .liquidBubbleHighlight(isDark = false, cornerFraction = 0.5f)
+            else -> Modifier
+                .size(72.dp)
+                .backdropLiquidGlass(
+                    backdrop = backdrop,
+                    shape = CircleShape,
+                    isDark = true,
+                    interactive = true,
+                    pressedScale = 1.07f,
+                    scrimAlpha = 0.22f,
+                    fallbackTint = Color.White.copy(alpha = 0.16f)
                 )
-            }
+                .clip(CircleShape)
         }
-        Spacer(modifier = Modifier.height(6.dp))
+
+        Box(
+            modifier = circleModifier.clickable(enabled = enabled, onClick = onClick),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = label,
+                tint = when {
+                    !enabled -> Color.White.copy(alpha = 0.3f)
+                    active -> Color.Black
+                    else -> Color.White
+                },
+                modifier = Modifier.size(28.dp)
+            )
+        }
+        Spacer(modifier = Modifier.height(7.dp))
         Text(
             text = label,
-            style = MaterialTheme.typography.labelMedium,
-            color = if (enabled) {
-                MaterialTheme.colorScheme.onSurface
-            } else {
-                MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)
-            }
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Normal,
+            color = if (enabled) Color.White else Color.White.copy(alpha = 0.35f)
         )
     }
 }
 
 @Composable
-private fun RoundCallButton(
+private fun AppleSolidCallCircle(
     icon: ImageVector,
     label: String,
     containerColor: Color,
     onClick: () -> Unit
 ) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Surface(
+        Box(
             modifier = Modifier
-                .size(72.dp)
+                .size(76.dp)
                 .clip(CircleShape)
+                .background(containerColor, CircleShape)
+                .liquidBubbleHighlight(isDark = false, cornerFraction = 0.5f) { 0.75f }
                 .clickable(onClick = onClick),
-            shape = CircleShape,
-            color = containerColor
+            contentAlignment = Alignment.Center
         ) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = label,
-                    tint = Color.White,
-                    modifier = Modifier.size(32.dp)
-                )
-            }
+            Icon(
+                imageVector = icon,
+                contentDescription = label,
+                tint = Color.White,
+                modifier = Modifier.size(32.dp)
+            )
         }
-        Spacer(modifier = Modifier.height(6.dp))
+        Spacer(modifier = Modifier.height(7.dp))
         Text(
             text = label,
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+            fontSize = 13.sp,
+            color = Color.White.copy(alpha = 0.88f)
         )
     }
 }
 
 @Composable
-private fun InCallDtmfKeypad(
+private fun AppleInCallDtmfKeypad(
     digitsEntered: String,
+    backdrop: Backdrop?,
     onDigitClick: (Char) -> Unit,
     onDigitReleased: () -> Unit,
     onHide: () -> Unit
@@ -705,43 +837,60 @@ private fun InCallDtmfKeypad(
         if (digitsEntered.isNotEmpty()) {
             Text(
                 text = digitsEntered,
-                style = MaterialTheme.typography.titleLarge,
+                style = TextStyle(
+                    color = Color.White,
+                    fontSize = 24.sp,
+                    fontWeight = FontWeight.Medium,
+                    fontFeatureSettings = "tnum"
+                ),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(bottom = 8.dp)
+                modifier = Modifier.padding(bottom = 10.dp)
             )
         }
         rows.forEach { row ->
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(vertical = 4.dp),
+                    .padding(vertical = 5.dp),
                 horizontalArrangement = Arrangement.SpaceEvenly
             ) {
                 row.forEach { digit ->
-                    Surface(
+                    Box(
                         modifier = Modifier
-                            .size(width = 80.dp, height = 54.dp)
-                            .clip(RoundedCornerShape(27.dp))
+                            .size(72.dp)
+                            .backdropLiquidGlass(
+                                backdrop = backdrop,
+                                shape = CircleShape,
+                                isDark = true,
+                                interactive = true,
+                                pressedScale = 1.07f,
+                                scrimAlpha = 0.22f,
+                                fallbackTint = Color.White.copy(alpha = 0.16f)
+                            )
+                            .clip(CircleShape)
                             .clickable {
                                 onDigitClick(digit)
                                 onDigitReleased()
                             },
-                        color = MaterialTheme.colorScheme.surfaceVariant
+                        contentAlignment = Alignment.Center
                     ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Text(
-                                text = digit.toString(),
-                                fontSize = 22.sp,
-                                fontWeight = FontWeight.Medium
+                        Text(
+                            text = digit.toString(),
+                            style = TextStyle(
+                                color = Color.White,
+                                fontSize = 28.sp,
+                                fontWeight = FontWeight.Normal,
+                                fontFeatureSettings = "tnum"
                             )
-                        }
+                        )
                     }
                 }
             }
         }
+        Spacer(modifier = Modifier.height(6.dp))
         TextButton(onClick = onHide) {
-            Text("Hide keypad")
+            Text("Hide", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
         }
     }
 }
@@ -758,23 +907,33 @@ private fun AudioRouteRow(
             .fillMaxWidth()
             .clip(RoundedCornerShape(14.dp))
             .clickable(onClick = onClick),
-        color = if (selected) {
-            MaterialTheme.colorScheme.primaryContainer
-        } else {
-            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
-        }
+        color = if (selected) TelviqueColors.AppleBlueDark.copy(alpha = 0.25f) else Color(0xFF2C2C2E)
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(imageVector = icon, contentDescription = null)
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = if (selected) TelviqueColors.AppleBlueDark else Color.White
+            )
             Spacer(modifier = Modifier.width(12.dp))
             Text(
                 text = label,
-                style = MaterialTheme.typography.bodyLarge,
-                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
+                color = Color.White,
+                fontSize = 16.sp,
+                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                modifier = Modifier.weight(1f)
             )
+            if (selected) {
+                Icon(
+                    imageVector = ApplePhoneIcons.Checkmark,
+                    contentDescription = "Selected",
+                    tint = TelviqueColors.AppleBlueDark,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
         }
     }
 }
