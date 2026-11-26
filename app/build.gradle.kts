@@ -5,7 +5,7 @@ plugins {
 
 android {
     namespace = "com.telvique.phone"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.telvique.phone"
