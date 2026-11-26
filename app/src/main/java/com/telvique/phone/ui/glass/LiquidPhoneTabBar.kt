@@ -442,7 +442,7 @@ fun LiquidCircularGlassButton(
                 edge = 0.012f
                 saturation = 1.08f
                 dispersion = 0f
-                tint = surfaceTint
+                this.tint = surfaceTint
             }
             .liquidBubbleHighlight(isDark = isDark, cornerFraction = 0.5f)
     } else {
