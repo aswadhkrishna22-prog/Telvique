@@ -90,6 +90,8 @@ fun DialerScreen(
     lastDialedNumber: String?,
     dialpadTonesEnabled: Boolean,
     dialpadVibrateEnabled: Boolean,
+    speedDial: Map<String, String> = emptyMap(),
+    voicemailNumber: String = "*86",
     showTopSettingsButton: Boolean,
     bottomInsetPadding: Dp,
     onOpenSettings: () -> Unit,
@@ -308,6 +310,29 @@ fun DialerScreen(
                     horizontalArrangement = Arrangement.SpaceEvenly
                 ) {
                     row.forEach { key ->
+                        val longTapAction: (() -> Unit)? = when {
+                            key.longPressDigit != null -> {
+                                {
+                                    playKeyFeedback(key.digit)
+                                    onDigitPress(key.longPressDigit)
+                                }
+                            }
+                            key.digit == "1" && input.isEmpty() -> {
+                                {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    if (voicemailNumber.isNotBlank()) {
+                                        onCallClick(voicemailNumber, false)
+                                    }
+                                }
+                            }
+                            key.digit in "2".."9" && input.isEmpty() && !speedDial[key.digit].isNullOrBlank() -> {
+                                {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    speedDial[key.digit]?.let { target -> onCallClick(target, false) }
+                                }
+                            }
+                            else -> null
+                        }
                         AppleLiquidDialKey(
                             key = key,
                             isDark = palette.isDark,
@@ -315,12 +340,7 @@ fun DialerScreen(
                                 playKeyFeedback(key.digit)
                                 onDigitPress(key.digit)
                             },
-                            onLongTap = key.longPressDigit?.let { alt ->
-                                {
-                                    playKeyFeedback(key.digit)
-                                    onDigitPress(alt)
-                                }
-                            }
+                            onLongTap = longTapAction
                         )
                     }
                 }

@@ -1,26 +1,33 @@
 package com.telvique.phone.ui.call
 
+import android.app.KeyguardManager
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
+import android.provider.ContactsContract
 import android.telecom.CallAudioState
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
@@ -29,11 +36,14 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AddIcCall
+import androidx.compose.material.icons.rounded.Block
 import androidx.compose.material.icons.rounded.BluetoothAudio
 import androidx.compose.material.icons.rounded.CallMerge
 import androidx.compose.material.icons.rounded.Headset
 import androidx.compose.material.icons.rounded.PhoneInTalk
 import androidx.compose.material.icons.rounded.SwapCalls
+import androidx.compose.material.icons.rounded.VerifiedUser
+import androidx.compose.material.icons.rounded.WarningAmber
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ModalBottomSheet
@@ -46,6 +56,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -55,14 +66,24 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 import coil3.compose.AsyncImage
 import com.kyant.backdrop.Backdrop
 import com.kyant.backdrop.backdrops.layerBackdrop
@@ -84,7 +105,6 @@ import com.telvique.phone.ui.glass.liquidBubbleHighlight
 import com.telvique.phone.ui.icons.ApplePhoneIcons
 import com.telvique.phone.ui.theme.TelviqueColors
 import com.telvique.phone.ui.theme.TelviqueTheme
-import kotlinx.coroutines.delay
 
 class CallActivity : ComponentActivity() {
 
@@ -104,7 +124,8 @@ class CallActivity : ComponentActivity() {
         }
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
-        val settingsFlow = (application as TelviqueApp).settingsRepository.settingsFlow
+        val settingsRepo = (application as TelviqueApp).settingsRepository
+        val settingsFlow = settingsRepo.settingsFlow
 
         setContent {
             TelviqueTheme(darkTheme = true, forceDarkSystemBars = true) {
@@ -125,6 +146,12 @@ class CallActivity : ComponentActivity() {
                     quickResponses = settings.quickResponses,
                     onAnswer = { CallManager.answer(it) },
                     onDecline = { CallManager.decline(it) },
+                    onBlockAndDecline = { number, id ->
+                        lifecycleScope.launch {
+                            if (number.isNotBlank()) settingsRepo.blockNumber(number)
+                        }
+                        CallManager.decline(id)
+                    },
                     onRejectWithSms = { msg, id -> CallManager.rejectWithMessage(msg, id) },
                     onDisconnect = { CallManager.disconnect(it) },
                     onToggleMute = { CallManager.toggleMute() },
@@ -138,6 +165,12 @@ class CallActivity : ComponentActivity() {
                             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
                         }
                         startActivity(intent)
+                    },
+                    onOpenContacts = {
+                        val intent = Intent(Intent.ACTION_VIEW, ContactsContract.Contacts.CONTENT_URI).apply {
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        runCatching { startActivity(intent) }
                     },
                     onPlayDtmf = { digit, id -> CallManager.playDtmf(digit, id) },
                     onStopDtmf = { id -> CallManager.stopDtmf(id) }
@@ -154,6 +187,7 @@ private fun CallScreen(
     quickResponses: List<String>,
     onAnswer: (String) -> Unit,
     onDecline: (String) -> Unit,
+    onBlockAndDecline: (String, String) -> Unit,
     onRejectWithSms: (String, String) -> Unit,
     onDisconnect: (String) -> Unit,
     onToggleMute: () -> Unit,
@@ -163,9 +197,11 @@ private fun CallScreen(
     onSwapCalls: () -> Unit,
     onMergeCalls: () -> Unit,
     onAddCall: () -> Unit,
+    onOpenContacts: () -> Unit,
     onPlayDtmf: (Char, String) -> Unit,
     onStopDtmf: (String) -> Unit
 ) {
+    val context = LocalContext.current
     val primary = telecomState.primaryCall
     val secondary = telecomState.secondaryCall
     var showKeypad by remember { mutableStateOf(false) }
@@ -173,6 +209,9 @@ private fun CallScreen(
     var showSmsSheet by remember { mutableStateOf(false) }
     var showAudioRouteSheet by remember { mutableStateOf(false) }
     var elapsedSeconds by remember { mutableLongStateOf(0L) }
+    val isDeviceLocked = remember(primary?.id, primary?.phase) {
+        context.getSystemService(KeyguardManager::class.java)?.isKeyguardLocked == true
+    }
 
     LaunchedEffect(primary?.id, primary?.phase, primary?.connectTimeMillis) {
         if (primary != null && primary.phase == CallPhase.ACTIVE && primary.connectTimeMillis > 0L) {
@@ -336,10 +375,72 @@ private fun CallScreen(
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
                         text = primary.number,
-                        color = Color.White.copy(alpha = 0.72f),
+                        color = Color.White.copy(alpha = 0.78f),
                         fontSize = 15.sp,
-                        fontWeight = FontWeight.Normal
+                        fontWeight = FontWeight.Medium
                     )
+                }
+
+                // TRAI CNAP / Carrier ID & Scam Shield Badges
+                if (primary.isPotentialSpam || primary.networkName != null || primary.isNetworkVerified) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (primary.isPotentialSpam) {
+                            Row(
+                                modifier = Modifier
+                                    .clip(CircleShape)
+                                    .background(TelviqueColors.CallRed.copy(alpha = 0.85f), CircleShape)
+                                    .padding(horizontal = 12.dp, vertical = 5.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.WarningAmber,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Spacer(modifier = Modifier.width(5.dp))
+                                Text(
+                                    text = "Suspected Telemarketer / Spam",
+                                    color = Color.White,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        } else if (primary.networkName != null || primary.isNetworkVerified) {
+                            Row(
+                                modifier = Modifier
+                                    .backdropLiquidGlass(
+                                        backdrop = posterBackdrop,
+                                        shape = CircleShape,
+                                        isDark = true,
+                                        interactive = false,
+                                        hasLens = false,
+                                        scrimAlpha = 0.28f,
+                                        fallbackTint = Color.White.copy(alpha = 0.16f)
+                                    )
+                                    .padding(horizontal = 12.dp, vertical = 5.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.VerifiedUser,
+                                    contentDescription = null,
+                                    tint = TelviqueColors.CallGreen,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Spacer(modifier = Modifier.width(5.dp))
+                                Text(
+                                    text = if (primary.networkName != null) "Carrier KYC • CNAP" else "Verified Caller",
+                                    color = Color.White,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        }
+                    }
                 }
 
                 Spacer(modifier = Modifier.height(22.dp))
@@ -355,59 +456,100 @@ private fun CallScreen(
                 Spacer(modifier = Modifier.weight(1f))
 
                 if (primary.phase == CallPhase.RINGING) {
-                    // Quick SMS pill
                     Row(
-                        modifier = Modifier
-                            .backdropLiquidGlass(
-                                backdrop = posterBackdrop,
-                                shape = CircleShape,
-                                isDark = true,
-                                interactive = true,
-                                pressedScale = 1.05f,
-                                scrimAlpha = 0.24f,
-                                fallbackTint = Color.White.copy(alpha = 0.16f)
-                            )
-                            .clip(CircleShape)
-                            .clickable { showSmsSheet = true }
-                            .padding(horizontal = 20.dp, vertical = 11.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(
-                            imageVector = ApplePhoneIcons.MessageFill,
-                            contentDescription = null,
-                            tint = Color.White,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "Message",
-                            color = Color.White,
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Medium
-                        )
+                        Row(
+                            modifier = Modifier
+                                .backdropLiquidGlass(
+                                    backdrop = posterBackdrop,
+                                    shape = CircleShape,
+                                    isDark = true,
+                                    interactive = true,
+                                    pressedScale = 1.05f,
+                                    hasLens = false,
+                                    scrimAlpha = 0.24f,
+                                    fallbackTint = Color.White.copy(alpha = 0.16f)
+                                )
+                                .clip(CircleShape)
+                                .clickable { showSmsSheet = true }
+                                .padding(horizontal = 18.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = ApplePhoneIcons.MessageFill,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(7.dp))
+                            Text(
+                                text = "Message",
+                                color = Color.White,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+
+                        if (primary.isPotentialSpam && primary.number.isNotBlank()) {
+                            Row(
+                                modifier = Modifier
+                                    .clip(CircleShape)
+                                    .background(TelviqueColors.CallRed.copy(alpha = 0.85f), CircleShape)
+                                    .clickable { onBlockAndDecline(primary.number, primary.id) }
+                                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Block,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(15.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "Block",
+                                    color = Color.White,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        }
                     }
 
-                    Spacer(modifier = Modifier.height(34.dp))
+                    Spacer(modifier = Modifier.height(28.dp))
 
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(bottom = 26.dp),
-                        horizontalArrangement = Arrangement.SpaceEvenly,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        AppleSolidCallCircle(
-                            icon = ApplePhoneIcons.PhoneDownFill,
-                            label = "Decline",
-                            containerColor = TelviqueColors.CallRed,
-                            onClick = { onDecline(primary.id) }
+                    if (isDeviceLocked) {
+                        AppleSlideToAnswerPill(
+                            backdrop = posterBackdrop,
+                            onAnswer = { onAnswer(primary.id) },
+                            onDecline = { onDecline(primary.id) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = 24.dp)
                         )
-                        AppleSolidCallCircle(
-                            icon = ApplePhoneIcons.PhoneFill,
-                            label = "Accept",
-                            containerColor = TelviqueColors.CallGreen,
-                            onClick = { onAnswer(primary.id) }
-                        )
+                    } else {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = 26.dp),
+                            horizontalArrangement = Arrangement.SpaceEvenly,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            AppleSolidCallCircle(
+                                icon = ApplePhoneIcons.PhoneDownFill,
+                                label = "Decline",
+                                containerColor = TelviqueColors.CallRed,
+                                onClick = { onDecline(primary.id) }
+                            )
+                            AppleSolidCallCircle(
+                                icon = ApplePhoneIcons.PhoneFill,
+                                label = "Accept",
+                                containerColor = TelviqueColors.CallGreen,
+                                onClick = { onAnswer(primary.id) }
+                            )
+                        }
                     }
                 } else {
                     AnimatedVisibility(
@@ -448,6 +590,7 @@ private fun CallScreen(
                             },
                             onToggleHold = { onToggleHold(primary.id) },
                             onAddCall = onAddCall,
+                            onOpenContacts = onOpenContacts,
                             onSwapCalls = onSwapCalls,
                             onMergeCalls = onMergeCalls
                         )
@@ -631,6 +774,7 @@ private fun AppleInCallControlsGrid(
     onAudioClick: () -> Unit,
     onToggleHold: () -> Unit,
     onAddCall: () -> Unit,
+    onOpenContacts: () -> Unit,
     onSwapCalls: () -> Unit,
     onMergeCalls: () -> Unit
 ) {
@@ -715,7 +859,13 @@ private fun AppleInCallControlsGrid(
                     onClick = onSwapCalls
                 )
             } else {
-                Spacer(modifier = Modifier.width(84.dp))
+                LiquidCallControlTile(
+                    icon = ApplePhoneIcons.PersonCropCircleFill,
+                    label = "contacts",
+                    active = false,
+                    backdrop = backdrop,
+                    onClick = onOpenContacts
+                )
             }
         }
     }
@@ -827,10 +977,10 @@ private fun AppleInCallDtmfKeypad(
     onHide: () -> Unit
 ) {
     val rows = listOf(
-        listOf('1', '2', '3'),
-        listOf('4', '5', '6'),
-        listOf('7', '8', '9'),
-        listOf('*', '0', '#')
+        listOf('1' to "", '2' to "ABC", '3' to "DEF"),
+        listOf('4' to "GHI", '5' to "JKL", '6' to "MNO"),
+        listOf('7' to "PQRS", '8' to "TUV", '9' to "WXYZ"),
+        listOf('*' to "", '0' to "+", '#' to "")
     )
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -857,8 +1007,8 @@ private fun AppleInCallDtmfKeypad(
                     .padding(vertical = 5.dp),
                 horizontalArrangement = Arrangement.SpaceEvenly
             ) {
-                row.forEach { digit ->
-                    Box(
+                row.forEach { (digit, letters) ->
+                    Column(
                         modifier = Modifier
                             .size(72.dp)
                             .backdropLiquidGlass(
@@ -877,7 +1027,8 @@ private fun AppleInCallDtmfKeypad(
                                 onDigitClick(digit)
                                 onDigitReleased()
                             },
-                        contentAlignment = Alignment.Center
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
                     ) {
                         Text(
                             text = digit.toString(),
@@ -888,6 +1039,15 @@ private fun AppleInCallDtmfKeypad(
                                 fontFeatureSettings = "tnum"
                             )
                         )
+                        if (letters.isNotEmpty()) {
+                            Text(
+                                text = letters,
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                letterSpacing = 1.2.sp,
+                                color = Color.White.copy(alpha = 0.7f)
+                            )
+                        }
                     }
                 }
             }
@@ -895,6 +1055,102 @@ private fun AppleInCallDtmfKeypad(
         Spacer(modifier = Modifier.height(6.dp))
         TextButton(onClick = onHide) {
             Text("Hide", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+        }
+    }
+}
+
+@Composable
+private fun AppleSlideToAnswerPill(
+    backdrop: Backdrop?,
+    onAnswer: () -> Unit,
+    onDecline: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val density = LocalDensity.current
+    val haptics = LocalHapticFeedback.current
+    val scope = rememberCoroutineScope()
+
+    Column(
+        modifier = modifier,
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        TextButton(onClick = onDecline) {
+            Text(
+                text = "Decline",
+                color = TelviqueColors.CallRed,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+        }
+
+        BoxWithConstraints(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(74.dp)
+                .backdropLiquidGlass(
+                    backdrop = backdrop,
+                    shape = CircleShape,
+                    isDark = true,
+                    interactive = false,
+                    hasLens = false,
+                    scrimAlpha = 0.24f,
+                    fallbackTint = Color.White.copy(alpha = 0.16f)
+                )
+                .clip(CircleShape)
+                .padding(5.dp)
+        ) {
+            val thumbSize = 64.dp
+            val maxDragPx = with(density) { (maxWidth - thumbSize).toPx().coerceAtLeast(1f) }
+            val offsetX = remember { Animatable(0f) }
+
+            Text(
+                text = "slide to answer",
+                color = Color.White.copy(alpha = (1f - offsetX.value / maxDragPx).coerceIn(0.15f, 0.85f)),
+                fontSize = 17.sp,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier.align(Alignment.Center)
+            )
+
+            Box(
+                modifier = Modifier
+                    .offset { IntOffset(offsetX.value.roundToInt(), 0) }
+                    .size(thumbSize)
+                    .clip(CircleShape)
+                    .background(TelviqueColors.CallGreen, CircleShape)
+                    .liquidBubbleHighlight(isDark = false, cornerFraction = 0.5f) { 0.8f }
+                    .pointerInput(maxDragPx) {
+                        detectHorizontalDragGestures(
+                            onDragEnd = {
+                                if (offsetX.value >= maxDragPx * 0.72f) {
+                                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    scope.launch {
+                                        offsetX.animateTo(maxDragPx, spring())
+                                        onAnswer()
+                                    }
+                                } else {
+                                    scope.launch { offsetX.animateTo(0f, spring()) }
+                                }
+                            },
+                            onDragCancel = {
+                                scope.launch { offsetX.animateTo(0f, spring()) }
+                            }
+                        ) { change, dragAmount ->
+                            change.consume()
+                            scope.launch {
+                                offsetX.snapTo((offsetX.value + dragAmount).coerceIn(0f, maxDragPx))
+                            }
+                        }
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = ApplePhoneIcons.PhoneFill,
+                    contentDescription = "Slide to Answer",
+                    tint = Color.White,
+                    modifier = Modifier.size(28.dp)
+                )
+            }
         }
     }
 }

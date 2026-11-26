@@ -1,5 +1,10 @@
 package com.telvique.phone.ui.settings
 
+import android.app.NotificationManager
+import android.content.Intent
+import android.net.Uri
+import android.os.Build
+import android.provider.Settings
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -46,6 +51,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -80,13 +86,22 @@ fun SettingsScreen(
     onSelectPreferredSim: (String?) -> Unit,
     onBlockNumber: (String) -> Unit,
     onUnblockNumber: (String) -> Unit,
-    onUpdateQuickResponse: (Int, String) -> Unit
+    onUpdateQuickResponse: (Int, String) -> Unit,
+    onSetSpeedDial: (String, String?) -> Unit = { _, _ -> },
+    onSetVoicemailNumber: (String) -> Unit = {}
 ) {
+    val context = LocalContext.current
     val palette = LocalApplePalette.current
     val hazeState = remember { HazeState() }
     val listState = rememberLazyListState()
     var showAddBlockDialog by remember { mutableStateOf(false) }
     var editingResponsePair by remember { mutableStateOf<Pair<Int, String>?>(null) }
+    var editingSpeedDialDigit by remember { mutableStateOf<String?>(null) }
+    val canFullScreen = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+        context.getSystemService(NotificationManager::class.java)?.canUseFullScreenIntent() == true
+    } else {
+        true
+    }
 
     val headerBlurProgress by remember {
         derivedStateOf {
@@ -208,6 +223,41 @@ fun SettingsScreen(
                                 )
                             ) {
                                 Text("Enable", fontSize = 13.sp)
+                            }
+                        }
+                    }
+
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE && !canFullScreen) {
+                        AppleInsetDivider()
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 13.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Full-Screen Incoming Calls",
+                                    color = palette.label,
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                                Text(
+                                    text = "Allow full-screen popup on lock screen",
+                                    color = palette.secondaryLabel,
+                                    fontSize = 13.sp
+                                )
+                            }
+                            TextButton(
+                                onClick = {
+                                    val intent = Intent(
+                                        Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT,
+                                        Uri.parse("package:${context.packageName}")
+                                    )
+                                    runCatching { context.startActivity(intent) }
+                                }
+                            ) {
+                                Text("Allow", color = palette.accentBlue, fontWeight = FontWeight.SemiBold)
                             }
                         }
                     }
@@ -379,6 +429,58 @@ fun SettingsScreen(
                 }
             }
 
+            // Speed Dial (1 Voicemail, 2-9 long-press)
+            item(key = "speed_dial_section") {
+                AppleSectionHeader("Speed Dial (Long-Press Keypad)")
+                AppleGroupedCard {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { editingSpeedDialDigit = "1" }
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "1 • Voicemail",
+                            color = palette.label,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Medium,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Text(
+                            text = settings.voicemailNumber,
+                            color = palette.accentBlue,
+                            fontSize = 14.sp
+                        )
+                    }
+                    for (d in '2'..'9') {
+                        val digit = d.toString()
+                        val assigned = settings.speedDial[digit]
+                        AppleInsetDivider()
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { editingSpeedDialDigit = digit }
+                                .padding(horizontal = 16.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Key $digit",
+                                color = palette.label,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Medium,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Text(
+                                text = assigned ?: "Not set",
+                                color = if (assigned != null) palette.accentBlue else palette.tertiaryLabel,
+                                fontSize = 14.sp
+                            )
+                        }
+                    }
+                }
+            }
+
             // Respond with Text
             item(key = "quick_responses_section") {
                 AppleSectionHeader("Respond with Text")
@@ -492,6 +594,57 @@ fun SettingsScreen(
             dismissButton = {
                 TextButton(onClick = { editingResponsePair = null }) {
                     Text("Cancel", color = palette.secondaryLabel)
+                }
+            }
+        )
+    }
+
+    editingSpeedDialDigit?.let { digit ->
+        val initial = if (digit == "1") settings.voicemailNumber else settings.speedDial[digit].orEmpty()
+        var draft by remember(digit) { mutableStateOf(initial) }
+        AlertDialog(
+            onDismissRequest = { editingSpeedDialDigit = null },
+            containerColor = palette.cardSurface,
+            titleContentColor = palette.label,
+            title = {
+                Text(
+                    text = if (digit == "1") "Voicemail Number (Key 1)" else "Speed Dial Key $digit",
+                    fontWeight = FontWeight.SemiBold
+                )
+            },
+            text = {
+                OutlinedTextField(
+                    value = draft,
+                    onValueChange = { draft = it },
+                    placeholder = { Text("Enter phone number") },
+                    singleLine = true
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        if (digit == "1") onSetVoicemailNumber(draft) else onSetSpeedDial(digit, draft)
+                        editingSpeedDialDigit = null
+                    }
+                ) {
+                    Text("Save", color = palette.accentBlue, fontWeight = FontWeight.SemiBold)
+                }
+            },
+            dismissButton = {
+                Row {
+                    if (digit != "1" && initial.isNotBlank()) {
+                        TextButton(
+                            onClick = {
+                                onSetSpeedDial(digit, null)
+                                editingSpeedDialDigit = null
+                            }
+                        ) {
+                            Text("Clear", color = palette.callRed)
+                        }
+                    }
+                    TextButton(onClick = { editingSpeedDialDigit = null }) {
+                        Text("Cancel", color = palette.secondaryLabel)
+                    }
                 }
             }
         )

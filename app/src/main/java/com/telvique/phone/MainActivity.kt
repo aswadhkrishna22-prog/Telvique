@@ -304,7 +304,7 @@ private fun TelviqueMainRoot(
                                     onLayoutModeChange = viewModel::setLayoutMode,
                                     onOpenSettings = { showUnifiedSettings = true },
                                     onCallNumber = { viewModel.callNumber(it) },
-                                    onDeleteEntry = viewModel::deleteCallLog,
+                                    onDeleteEntries = viewModel::deleteCallLogs,
                                     onClearAll = viewModel::clearCallLogs,
                                     onToggleBlock = { number, block ->
                                         if (block) viewModel.blockNumber(number) else viewModel.unblockNumber(number)
@@ -332,6 +332,8 @@ private fun TelviqueMainRoot(
                                     lastDialedNumber = uiState.callLogs.firstOrNull { it.number.isNotBlank() }?.number,
                                     dialpadTonesEnabled = uiState.settings.dialpadTonesEnabled,
                                     dialpadVibrateEnabled = uiState.settings.dialpadVibrateEnabled,
+                                    speedDial = uiState.settings.speedDial,
+                                    voicemailNumber = uiState.settings.voicemailNumber,
                                     showTopSettingsButton = true,
                                     bottomInsetPadding = bottomBarReservedHeight,
                                     onOpenSettings = { showUnifiedSettings = true },
@@ -373,7 +375,7 @@ private fun TelviqueMainRoot(
                                     onLayoutModeChange = viewModel::setLayoutMode,
                                     onOpenSettings = { classicTab = ClassicTab.SETTINGS },
                                     onCallNumber = { viewModel.callNumber(it) },
-                                    onDeleteEntry = viewModel::deleteCallLog,
+                                    onDeleteEntries = viewModel::deleteCallLogs,
                                     onClearAll = viewModel::clearCallLogs,
                                     onToggleBlock = { number, block ->
                                         if (block) viewModel.blockNumber(number) else viewModel.unblockNumber(number)
@@ -401,6 +403,8 @@ private fun TelviqueMainRoot(
                                     lastDialedNumber = uiState.callLogs.firstOrNull { it.number.isNotBlank() }?.number,
                                     dialpadTonesEnabled = uiState.settings.dialpadTonesEnabled,
                                     dialpadVibrateEnabled = uiState.settings.dialpadVibrateEnabled,
+                                    speedDial = uiState.settings.speedDial,
+                                    voicemailNumber = uiState.settings.voicemailNumber,
                                     showTopSettingsButton = false,
                                     bottomInsetPadding = bottomBarReservedHeight,
                                     onOpenSettings = { classicTab = ClassicTab.SETTINGS },
@@ -427,7 +431,9 @@ private fun TelviqueMainRoot(
                                     onSelectPreferredSim = viewModel::setPreferredSimId,
                                     onBlockNumber = viewModel::blockNumber,
                                     onUnblockNumber = viewModel::unblockNumber,
-                                    onUpdateQuickResponse = viewModel::updateQuickResponse
+                                    onUpdateQuickResponse = viewModel::updateQuickResponse,
+                                    onSetSpeedDial = viewModel::setSpeedDial,
+                                    onSetVoicemailNumber = viewModel::setVoicemailNumber
                                 )
                             }
                             }
@@ -524,7 +530,9 @@ private fun TelviqueMainRoot(
                     onSelectPreferredSim = viewModel::setPreferredSimId,
                     onBlockNumber = viewModel::blockNumber,
                     onUnblockNumber = viewModel::unblockNumber,
-                    onUpdateQuickResponse = viewModel::updateQuickResponse
+                    onUpdateQuickResponse = viewModel::updateQuickResponse,
+                    onSetSpeedDial = viewModel::setSpeedDial,
+                    onSetVoicemailNumber = viewModel::setVoicemailNumber
                 )
             }
 

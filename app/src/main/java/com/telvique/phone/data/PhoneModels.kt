@@ -46,6 +46,49 @@ data class CallLogItem(
         get() = cachedName?.takeIf { it.isNotBlank() } ?: number.ifBlank { "Private Number" }
 }
 
+data class GroupedCallLogItem(
+    val primary: CallLogItem,
+    val count: Int,
+    val entryIds: List<Long>
+)
+
+fun groupConsecutiveCallLogs(logs: List<CallLogItem>): List<GroupedCallLogItem> {
+    if (logs.isEmpty()) return emptyList()
+    val result = mutableListOf<GroupedCallLogItem>()
+    var currentHead = logs.first()
+    val currentIds = mutableListOf(currentHead.id)
+
+    fun sameBucket(a: CallLogItem, b: CallLogItem): Boolean {
+        val aMissed = a.type == CallLogType.MISSED || a.type == CallLogType.REJECTED
+        val bMissed = b.type == CallLogType.MISSED || b.type == CallLogType.REJECTED
+        if (aMissed != bMissed) return false
+        val sameNumber = if (a.number.isNotBlank() && b.number.isNotBlank()) {
+            a.number == b.number || PhoneFormatUtils.numbersMatch(a.number, b.number)
+        } else {
+            a.displayTitle == b.displayTitle
+        }
+        if (!sameNumber) return false
+        val calA = Calendar.getInstance().apply { timeInMillis = a.timestamp }
+        val calB = Calendar.getInstance().apply { timeInMillis = b.timestamp }
+        return calA.get(Calendar.YEAR) == calB.get(Calendar.YEAR) &&
+            calA.get(Calendar.DAY_OF_YEAR) == calB.get(Calendar.DAY_OF_YEAR)
+    }
+
+    for (i in 1 until logs.size) {
+        val item = logs[i]
+        if (sameBucket(currentHead, item)) {
+            currentIds.add(item.id)
+        } else {
+            result.add(GroupedCallLogItem(currentHead, currentIds.size, currentIds.toList()))
+            currentHead = item
+            currentIds.clear()
+            currentIds.add(item.id)
+        }
+    }
+    result.add(GroupedCallLogItem(currentHead, currentIds.size, currentIds.toList()))
+    return result
+}
+
 enum class PhoneLayoutMode(val label: String) {
     UNIFIED("Unified"),
     CLASSIC("Classic")
@@ -78,6 +121,13 @@ object PhoneFormatUtils {
         val tailA = comparableTail(a)
         val tailB = comparableTail(b)
         return tailA.isNotEmpty() && tailA == tailB
+    }
+
+    fun isSuspectedTelemarketer(number: String): Boolean {
+        val digits = number.filter { it.isDigit() }
+        if (digits.length < 10) return false
+        val local = if (digits.startsWith("91") && digits.length == 12) digits.drop(2) else digits
+        return local.length == 10 && (local.startsWith("140") || local.startsWith("160"))
     }
 
     fun formatDuration(seconds: Long): String {

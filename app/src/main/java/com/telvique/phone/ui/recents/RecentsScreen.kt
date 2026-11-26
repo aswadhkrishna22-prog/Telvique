@@ -34,9 +34,13 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -57,9 +61,12 @@ import androidx.compose.ui.unit.sp
 import com.telvique.phone.data.CallLogItem
 import com.telvique.phone.data.CallLogType
 import com.telvique.phone.data.ContactItem
+import com.telvique.phone.data.GroupedCallLogItem
 import com.telvique.phone.data.PhoneFormatUtils
 import com.telvique.phone.data.PhoneLayoutMode
 import com.telvique.phone.data.RecentsFilter
+import com.telvique.phone.data.groupConsecutiveCallLogs
+import com.telvique.phone.telecom.CallManager
 import com.telvique.phone.ui.components.AppleLargeHeader
 import com.telvique.phone.ui.components.ContactAvatar
 import com.telvique.phone.ui.components.copyNumberToClipboard
@@ -86,7 +93,7 @@ fun RecentsScreen(
     onLayoutModeChange: (PhoneLayoutMode) -> Unit,
     onOpenSettings: () -> Unit,
     onCallNumber: (String) -> Unit,
-    onDeleteEntry: (Long) -> Unit,
+    onDeleteEntries: (List<Long>) -> Unit,
     onClearAll: () -> Unit,
     onToggleBlock: (String, Boolean) -> Unit,
 ) {
@@ -96,7 +103,8 @@ fun RecentsScreen(
     val listState = rememberLazyListState()
     var showFilterMenu by remember { mutableStateOf(false) }
     var showClearDialog by remember { mutableStateOf(false) }
-    var infoTarget by remember { mutableStateOf<CallLogItem?>(null) }
+    var infoTarget by remember { mutableStateOf<GroupedCallLogItem?>(null) }
+    val groupedLogs = remember(callLogs) { groupConsecutiveCallLogs(callLogs) }
 
     val headerBlurProgress by remember {
         derivedStateOf {
@@ -306,15 +314,46 @@ fun RecentsScreen(
                     }
                 }
             } else {
-                itemsIndexed(callLogs, key = { _, it -> it.id }) { index, item ->
-                    AppleRecentCallRow(
-                        item = item,
-                        showDivider = index < callLogs.lastIndex,
-                        onRowClick = {
-                            if (item.number.isNotBlank()) onCallNumber(item.number)
-                        },
-                        onInfoClick = { infoTarget = item }
-                    )
+                itemsIndexed(groupedLogs, key = { _, g -> g.primary.id }) { index, group ->
+                    val item = group.primary
+                    val dismissState = rememberSwipeToDismissBoxState()
+                    LaunchedEffect(dismissState.currentValue) {
+                        if (dismissState.currentValue == SwipeToDismissBoxValue.EndToStart) {
+                            onDeleteEntries(group.entryIds)
+                        }
+                    }
+
+                    SwipeToDismissBox(
+                        state = dismissState,
+                        enableDismissFromStartToEnd = false,
+                        enableDismissFromEndToStart = true,
+                        backgroundContent = {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(palette.callRed)
+                                    .padding(horizontal = 24.dp),
+                                contentAlignment = Alignment.CenterEnd
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.DeleteOutline,
+                                    contentDescription = "Delete",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
+                        }
+                    ) {
+                        AppleRecentCallRow(
+                            item = item,
+                            count = group.count,
+                            showDivider = index < groupedLogs.lastIndex,
+                            onRowClick = {
+                                if (item.number.isNotBlank()) onCallNumber(item.number)
+                            },
+                            onInfoClick = { infoTarget = group }
+                        )
+                    }
                 }
             }
         }
@@ -330,8 +369,13 @@ fun RecentsScreen(
         }
     }
 
-    val activeItem = infoTarget
+    val activeGroup = infoTarget
+    val activeItem = activeGroup?.primary
     if (activeItem != null) {
+        val cnapName = if (activeItem.cachedName.isNullOrBlank()) {
+            CallManager.lookupCachedCnapName(activeItem.number)
+        } else null
+        val effectiveTitle = cnapName ?: activeItem.displayTitle
         val isBlocked = blockedNumbers.any {
             it == activeItem.number || PhoneFormatUtils.numbersMatch(it, activeItem.number)
         }
@@ -346,18 +390,26 @@ fun RecentsScreen(
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 ContactAvatar(
-                    name = activeItem.displayTitle,
+                    name = effectiveTitle,
                     photoUri = activeItem.photoUri,
                     size = 76.dp
                 )
                 Spacer(modifier = Modifier.height(10.dp))
                 Text(
-                    text = activeItem.displayTitle,
+                    text = effectiveTitle,
                     color = palette.label,
                     fontSize = 24.sp,
                     fontWeight = FontWeight.SemiBold
                 )
-                if (activeItem.number.isNotBlank() && activeItem.number != activeItem.displayTitle) {
+                if (cnapName != null) {
+                    Text(
+                        text = "Carrier ID (CNAP)",
+                        color = palette.accentBlue,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+                if (activeItem.number.isNotBlank() && activeItem.number != effectiveTitle) {
                     Text(
                         text = activeItem.number,
                         color = palette.secondaryLabel,
@@ -468,7 +520,7 @@ fun RecentsScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable {
-                                onDeleteEntry(activeItem.id)
+                                onDeleteEntries(activeGroup.entryIds)
                                 infoTarget = null
                             }
                             .padding(horizontal = 16.dp, vertical = 14.dp),
@@ -562,16 +614,24 @@ private fun AppleAllMissedSegmentedControl(
 @Composable
 private fun AppleRecentCallRow(
     item: CallLogItem,
+    count: Int,
     showDivider: Boolean,
     onRowClick: () -> Unit,
     onInfoClick: () -> Unit
 ) {
     val palette = LocalApplePalette.current
     val isMissed = item.type == CallLogType.MISSED || item.type == CallLogType.REJECTED
+    val cnapName = if (item.cachedName.isNullOrBlank()) {
+        CallManager.lookupCachedCnapName(item.number)
+    } else null
+    val isSpam = item.cachedName.isNullOrBlank() && PhoneFormatUtils.isSuspectedTelemarketer(item.number)
+    val baseTitle = cnapName ?: item.displayTitle
+    val titleWithCount = if (count > 1) "$baseTitle ($count)" else baseTitle
 
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            .background(palette.background)
             .clickable(onClick = onRowClick)
     ) {
         Row(
@@ -614,8 +674,8 @@ private fun AppleRecentCallRow(
 
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = item.displayTitle,
-                    color = if (isMissed) palette.callRed else palette.label,
+                    text = titleWithCount,
+                    color = if (isMissed || isSpam) palette.callRed else palette.label,
                     fontSize = 16.sp,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
@@ -623,10 +683,12 @@ private fun AppleRecentCallRow(
                 )
                 Spacer(modifier = Modifier.height(1.dp))
                 val meta = buildList {
-                    when (item.type) {
-                        CallLogType.MISSED -> add("Missed")
-                        CallLogType.REJECTED -> add("Declined")
-                        CallLogType.BLOCKED -> add("Blocked")
+                    when {
+                        isSpam -> add("Telemarketer")
+                        cnapName != null -> add("Carrier ID")
+                        item.type == CallLogType.MISSED -> add("Missed")
+                        item.type == CallLogType.REJECTED -> add("Declined")
+                        item.type == CallLogType.BLOCKED -> add("Blocked")
                         else -> add("mobile")
                     }
                     if (!item.simLabel.isNullOrBlank()) add(item.simLabel)

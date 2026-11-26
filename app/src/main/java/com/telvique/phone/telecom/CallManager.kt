@@ -47,7 +47,10 @@ data class CallUiItem(
     val canHold: Boolean,
     val canMerge: Boolean,
     val canSwap: Boolean,
-    val disconnectCauseLabel: String?
+    val disconnectCauseLabel: String?,
+    val networkName: String? = null,
+    val isNetworkVerified: Boolean = false,
+    val isPotentialSpam: Boolean = false,
 )
 
 data class CallAudioUiState(
@@ -83,12 +86,19 @@ object CallManager {
     private val callIdsByInstance = mutableMapOf<Call, String>()
     private val resolvedContacts = mutableMapOf<String, Pair<String?, String?>>()
     private val callbacksByCall = mutableMapOf<Call, Call.Callback>()
+    private val cnapNameCache = mutableMapOf<String, String>()
     private var nextCallId = 1
     private val connectedVibratedCallIds = mutableSetOf<String>()
     private var availableEndpoints: List<CallEndpoint> = emptyList()
 
     private val _uiState = MutableStateFlow(TelecomUiState())
     val uiState: StateFlow<TelecomUiState> = _uiState.asStateFlow()
+
+    fun lookupCachedCnapName(number: String): String? {
+        val tail = com.telvique.phone.data.PhoneFormatUtils.comparableTail(number)
+        if (tail.isEmpty()) return null
+        return cnapNameCache[tail]
+    }
 
     fun attachService(service: TelviqueInCallService) {
         serviceRef = service
@@ -383,6 +393,24 @@ object CallManager {
                 null
             }
             val callerName = details.callerDisplayName?.takeIf { it.isNotBlank() }
+            if (callerName != null && number.isNotBlank()) {
+                val tail = com.telvique.phone.data.PhoneFormatUtils.comparableTail(number)
+                if (tail.isNotEmpty()) cnapNameCache[tail] = callerName
+            }
+            val verificationStatus = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                details.callerNumberVerificationStatus
+            } else {
+                0
+            }
+            val isNetworkVerified = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
+                verificationStatus == Call.Details.VERIFICATION_STATUS_PASSED
+            val isVerificationFailed = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
+                verificationStatus == Call.Details.VERIFICATION_STATUS_FAILED
+            val isIndianTelemarketer = com.telvique.phone.data.PhoneFormatUtils.isSuspectedTelemarketer(number)
+            val isPotentialSpam = resolvedName == null && contactName == null &&
+                (isVerificationFailed || isIndianTelemarketer)
+
+            val networkName = if (resolvedName == null && contactName == null) callerName else null
             val displayName = when {
                 isConference -> "Conference Call"
                 resolvedName != null -> resolvedName
@@ -415,7 +443,10 @@ object CallManager {
                 canHold = canHold,
                 canMerge = canMerge,
                 canSwap = canSwap,
-                disconnectCauseLabel = details.disconnectCause?.label?.toString()
+                disconnectCauseLabel = details.disconnectCause?.label?.toString(),
+                networkName = networkName,
+                isNetworkVerified = isNetworkVerified,
+                isPotentialSpam = isPotentialSpam,
             )
         }
 

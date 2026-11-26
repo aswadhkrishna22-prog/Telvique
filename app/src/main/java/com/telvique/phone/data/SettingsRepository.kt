@@ -19,7 +19,9 @@ data class TelviqueSettings(
     val blockedNumbers: Set<String> = emptySet(),
     val quickResponses: List<String> = DEFAULT_QUICK_RESPONSES,
     val preferredSimId: String? = null,
-    val layoutMode: PhoneLayoutMode = PhoneLayoutMode.UNIFIED
+    val layoutMode: PhoneLayoutMode = PhoneLayoutMode.UNIFIED,
+    val speedDial: Map<String, String> = emptyMap(),
+    val voicemailNumber: String = "*86"
 ) {
     companion object {
         val DEFAULT_QUICK_RESPONSES = listOf(
@@ -41,6 +43,8 @@ class SettingsRepository(private val context: Context) {
         val QUICK_RESPONSES = stringPreferencesKey("quick_responses_joined")
         val PREFERRED_SIM_ID = stringPreferencesKey("preferred_sim_id")
         val LAYOUT_MODE = stringPreferencesKey("phone_layout_mode")
+        val VOICEMAIL_NUMBER = stringPreferencesKey("voicemail_number")
+        fun speedDialKey(digit: String) = stringPreferencesKey("speed_dial_$digit")
     }
 
     val settingsFlow: Flow<TelviqueSettings> = context.telviqueDataStore.data.map { prefs ->
@@ -53,6 +57,13 @@ class SettingsRepository(private val context: Context) {
         val mode = prefs[Keys.LAYOUT_MODE]
             ?.let { raw -> PhoneLayoutMode.entries.firstOrNull { it.name == raw } }
             ?: PhoneLayoutMode.UNIFIED
+        val speedDialMap = buildMap {
+            for (d in '2'..'9') {
+                val digit = d.toString()
+                val num = prefs[Keys.speedDialKey(digit)]?.takeIf { it.isNotBlank() }
+                if (num != null) put(digit, num)
+            }
+        }
         TelviqueSettings(
             dialpadTonesEnabled = prefs[Keys.DIALPAD_TONES] ?: true,
             dialpadVibrateEnabled = prefs[Keys.DIALPAD_VIBRATE] ?: true,
@@ -60,7 +71,9 @@ class SettingsRepository(private val context: Context) {
             blockedNumbers = prefs[Keys.BLOCKED_NUMBERS] ?: emptySet(),
             quickResponses = responses,
             preferredSimId = prefs[Keys.PREFERRED_SIM_ID]?.takeIf { it.isNotBlank() },
-            layoutMode = mode
+            layoutMode = mode,
+            speedDial = speedDialMap,
+            voicemailNumber = prefs[Keys.VOICEMAIL_NUMBER]?.takeIf { it.isNotBlank() } ?: "*86"
         )
     }
 
@@ -88,6 +101,21 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun setLayoutMode(mode: PhoneLayoutMode) {
         context.telviqueDataStore.edit { it[Keys.LAYOUT_MODE] = mode.name }
+    }
+
+    suspend fun setSpeedDial(digit: String, number: String?) {
+        if (digit.length != 1 || digit[0] !in '2'..'9') return
+        context.telviqueDataStore.edit {
+            val cleaned = number?.trim().orEmpty()
+            if (cleaned.isEmpty()) it.remove(Keys.speedDialKey(digit))
+            else it[Keys.speedDialKey(digit)] = cleaned
+        }
+    }
+
+    suspend fun setVoicemailNumber(number: String) {
+        val cleaned = number.trim()
+        if (cleaned.isEmpty()) return
+        context.telviqueDataStore.edit { it[Keys.VOICEMAIL_NUMBER] = cleaned }
     }
 
     suspend fun blockNumber(number: String) {

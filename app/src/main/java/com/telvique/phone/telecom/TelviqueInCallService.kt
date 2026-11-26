@@ -1,8 +1,6 @@
 package com.telvique.phone.telecom
 
-import android.Manifest
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.os.Build
 import android.os.PowerManager
 import android.telecom.Call
@@ -10,7 +8,6 @@ import android.telecom.CallAudioState
 import android.telecom.CallEndpoint
 import android.telecom.InCallService
 import androidx.annotation.RequiresApi
-import androidx.core.content.ContextCompat
 import com.telvique.phone.ui.call.CallActivity
 
 class TelviqueInCallService : InCallService() {
@@ -33,21 +30,10 @@ class TelviqueInCallService : InCallService() {
         super.onCallAdded(call)
         CallManager.onCallAdded(this, call)
 
-        val state = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            call.details.state
-        } else {
-            @Suppress("DEPRECATION")
-            call.state
-        }
-        val canPostNotifications = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
-            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) ==
-            PackageManager.PERMISSION_GRANTED
-
-        // Incoming ringing calls use CallStyle + fullScreenIntent notifications when allowed,
-        // avoiding direct background Activity launches. Outgoing calls open CallActivity directly.
-        if (state != Call.STATE_RINGING || !canPostNotifications) {
-            launchCallScreen()
-        }
+        // Active Default Dialer InCallService holds Android's BAL exemption, so launch CallActivity
+        // directly for both incoming ringing calls and outgoing calls (in addition to CallStyle
+        // notification / fullScreenIntent) so incoming calls always pop up whether locked or unlocked.
+        runCatching { launchCallScreen() }
     }
 
     override fun onCallRemoved(call: Call) {
@@ -103,7 +89,11 @@ class TelviqueInCallService : InCallService() {
 
     private fun launchCallScreen() {
         val intent = Intent(this, CallActivity::class.java).apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            addFlags(
+                Intent.FLAG_ACTIVITY_NEW_TASK or
+                    Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                    Intent.FLAG_ACTIVITY_NO_USER_ACTION
+            )
         }
         startActivity(intent)
     }

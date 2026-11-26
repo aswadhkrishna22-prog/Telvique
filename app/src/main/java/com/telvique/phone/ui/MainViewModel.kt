@@ -296,6 +296,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun deleteCallLogs(ids: List<Long>) {
+        viewModelScope.launch {
+            var deletedAny = false
+            ids.forEach { id ->
+                if (repo.deleteCallLogEntry(id)) deletedAny = true
+            }
+            if (deletedAny) {
+                callLogsFlow.value = repo.loadCallLogs()
+            }
+        }
+    }
+
     fun clearCallLogs() {
         viewModelScope.launch {
             if (repo.clearAllCallLogs()) {
@@ -330,6 +342,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setLayoutMode(mode: PhoneLayoutMode) {
         viewModelScope.launch { settingsRepo.setLayoutMode(mode) }
+    }
+
+    fun setSpeedDial(digit: String, number: String?) {
+        viewModelScope.launch { settingsRepo.setSpeedDial(digit, number) }
+    }
+
+    fun setVoicemailNumber(number: String) {
+        viewModelScope.launch { settingsRepo.setVoicemailNumber(number) }
     }
 
     fun blockNumber(number: String) {

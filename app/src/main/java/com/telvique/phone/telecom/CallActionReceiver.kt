@@ -3,13 +3,22 @@ package com.telvique.phone.telecom
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import com.telvique.phone.ui.call.CallActivity
 
 class CallActionReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
         val callId = intent.getStringExtra(EXTRA_CALL_ID)
         when (intent.action) {
-            ACTION_ANSWER -> CallManager.answer(callId)
+            ACTION_ANSWER -> {
+                CallManager.answer(callId)
+                runCatching {
+                    val callIntent = Intent(context, CallActivity::class.java).apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                    }
+                    context.startActivity(callIntent)
+                }
+            }
             ACTION_DECLINE -> CallManager.decline(callId)
             ACTION_HANGUP -> CallManager.disconnect(callId)
         }
