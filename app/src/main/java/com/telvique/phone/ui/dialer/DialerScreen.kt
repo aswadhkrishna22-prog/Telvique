@@ -2,7 +2,6 @@ package com.telvique.phone.ui.dialer
 
 import android.media.AudioManager
 import android.media.ToneGenerator
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
@@ -341,7 +340,7 @@ fun DialerScreen(
                 modifier = Modifier.size(76.dp),
                 contentAlignment = Alignment.Center
             ) {
-                AnimatedVisibility(
+                androidx.compose.animation.AnimatedVisibility(
                     visible = input.isEmpty(),
                     enter = fadeIn() + scaleIn(initialScale = 0.85f),
                     exit = fadeOut() + scaleOut(targetScale = 0.85f)
@@ -403,7 +402,7 @@ fun DialerScreen(
                 modifier = Modifier.size(76.dp),
                 contentAlignment = Alignment.Center
             ) {
-                AnimatedVisibility(
+                androidx.compose.animation.AnimatedVisibility(
                     visible = input.isNotEmpty(),
                     enter = fadeIn() + scaleIn(initialScale = 0.85f),
                     exit = fadeOut() + scaleOut(targetScale = 0.85f)
