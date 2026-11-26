@@ -56,6 +56,7 @@ import androidx.compose.ui.AbsoluteAlignment
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -249,6 +250,7 @@ fun LiquidPhoneTabBar(
                     neutral = neutralInk,
                     active = activeInk,
                     captured = true,
+                    isDark = isDark,
                     onSelect = {},
                     modifier = Modifier.fillMaxSize().padding(4.dp),
                 )
@@ -364,6 +366,7 @@ fun LiquidPhoneTabBar(
                 neutral = neutralInk,
                 active = if (pressed) neutralInk else activeInk,
                 captured = false,
+                isDark = isDark,
                 onSelect = {
                     haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                     select(it)
@@ -491,6 +494,7 @@ private fun PhoneNavigationGlyphs(
     neutral: Color,
     active: Color,
     captured: Boolean,
+    isDark: Boolean,
     onSelect: (Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -519,7 +523,15 @@ private fun PhoneNavigationGlyphs(
                 modifier = Modifier
                     .weight(weight)
                     .fillMaxHeight()
-                    .then(inputModifier),
+                    .then(inputModifier)
+                    .then(
+                        if (isSelected) Modifier.drawBehind {
+                            drawCircle(
+                                color = active.copy(alpha = if (isDark) 0.18f else 0.12f),
+                                radius = 18.dp.toPx()
+                            )
+                        } else Modifier
+                    ),
                 contentAlignment = Alignment.Center,
             ) {
                 Row(

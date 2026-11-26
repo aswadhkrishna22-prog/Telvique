@@ -65,6 +65,7 @@ import com.telvique.phone.data.GroupedCallLogItem
 import com.telvique.phone.data.PhoneFormatUtils
 import com.telvique.phone.data.PhoneLayoutMode
 import com.telvique.phone.data.RecentsFilter
+import com.telvique.phone.data.SimAccountInfo
 import com.telvique.phone.data.groupConsecutiveCallLogs
 import com.telvique.phone.telecom.CallManager
 import com.telvique.phone.ui.components.AppleLargeHeader
@@ -89,6 +90,7 @@ fun RecentsScreen(
     selectedFilter: RecentsFilter,
     blockedNumbers: Set<String>,
     bottomInsetPadding: Dp,
+    simAccounts: List<SimAccountInfo> = emptyList(),
     onFilterChange: (RecentsFilter) -> Unit,
     onLayoutModeChange: (PhoneLayoutMode) -> Unit,
     onOpenSettings: () -> Unit,
@@ -348,6 +350,7 @@ fun RecentsScreen(
                             item = item,
                             count = group.count,
                             showDivider = index < groupedLogs.lastIndex,
+                            showSimLabel = simAccounts.size > 1,
                             onRowClick = {
                                 if (item.number.isNotBlank()) onCallNumber(item.number)
                             },
@@ -681,6 +684,7 @@ private fun AppleRecentCallRow(
     item: CallLogItem,
     count: Int,
     showDivider: Boolean,
+    showSimLabel: Boolean = false,
     onRowClick: () -> Unit,
     onInfoClick: () -> Unit
 ) {
@@ -759,9 +763,9 @@ private fun AppleRecentCallRow(
                         item.type == CallLogType.MISSED -> add("Missed")
                         item.type == CallLogType.REJECTED -> add("Declined")
                         item.type == CallLogType.BLOCKED -> add("Blocked")
-                        else -> add("mobile")
+                        else -> { } // plain call — no subtitle label
                     }
-                    if (!item.simLabel.isNullOrBlank()) add(item.simLabel)
+                    if (!item.simLabel.isNullOrBlank() && showSimLabel) add(item.simLabel)
                     if (item.durationSeconds > 0L) add(PhoneFormatUtils.formatDuration(item.durationSeconds))
                 }.joinToString(" • ")
 
@@ -790,7 +794,7 @@ private fun AppleRecentCallRow(
                 Icon(
                     imageVector = ApplePhoneIcons.InfoCircle,
                     contentDescription = "Call Info",
-                    tint = palette.accentBlue,
+                    tint = palette.tertiaryLabel,
                     modifier = Modifier.size(21.dp)
                 )
             }

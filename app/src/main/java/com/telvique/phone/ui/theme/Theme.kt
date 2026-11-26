@@ -32,86 +32,88 @@ data class TelviqueApplePalette(
     val keypadKeyFill: Color,
 )
 
+// Velvet Ink — Light
 private val AppleLightPalette = TelviqueApplePalette(
     isDark = false,
     background = Color(0xFFFFFFFF),
-    groupedBackground = Color(0xFFF2F2F7),
+    groupedBackground = Color(0xFFF5F3FA),
     cardSurface = Color(0xFFFFFFFF),
-    secondaryFill = Color(0xFFE9E9EE),
-    tertiaryFill = Color(0xFFF2F2F7),
-    label = Color(0xFF000000),
-    secondaryLabel = Color(0xFF8E8E93),
-    tertiaryLabel = Color(0xFFAEAEB2),
-    separator = Color(0xFFC6C6C8),
-    accentBlue = Color(0xFF007AFF),
-    callGreen = Color(0xFF34C759),
-    callRed = Color(0xFFFF3B30),
-    keypadKeyFill = Color(0xFFE5E5EA),
+    secondaryFill = Color(0xFFECE9F4),
+    tertiaryFill = Color(0xFFF5F3FA),
+    label = Color(0xFF0E0C14),
+    secondaryLabel = Color(0xFF7A7589),
+    tertiaryLabel = Color(0xFFA9A4B8),
+    separator = Color(0xFFD9D5E3),
+    accentBlue = Color(0xFF5B3FE0),
+    callGreen = Color(0xFF2FBF71),
+    callRed = Color(0xFFF2475A),
+    keypadKeyFill = Color(0xFFECE9F4),
 )
 
+// Velvet Ink — Dark
 private val AppleDarkPalette = TelviqueApplePalette(
     isDark = true,
     background = Color(0xFF000000),
     groupedBackground = Color(0xFF000000),
-    cardSurface = Color(0xFF1C1C1E),
-    secondaryFill = Color(0xFF2C2C2E),
-    tertiaryFill = Color(0xFF3A3A3C),
-    label = Color(0xFFFFFFFF),
-    secondaryLabel = Color(0xFF8E8E93),
-    tertiaryLabel = Color(0xFF636366),
-    separator = Color(0xFF38383A),
-    accentBlue = Color(0xFF0A84FF),
-    callGreen = Color(0xFF30D158),
-    callRed = Color(0xFFFF453A),
-    keypadKeyFill = Color(0xFF2C2C2E),
+    cardSurface = Color(0xFF15141A),
+    secondaryFill = Color(0xFF211F29),
+    tertiaryFill = Color(0xFF2B2835),
+    label = Color(0xFFF5F3FA),
+    secondaryLabel = Color(0xFF9A95A8),
+    tertiaryLabel = Color(0xFF6B667A),
+    separator = Color(0xFF2E2B38),
+    accentBlue = Color(0xFF8E7BFF),
+    callGreen = Color(0xFF34D27F),
+    callRed = Color(0xFFFF5A6B),
+    keypadKeyFill = Color(0xFF211F29),
 )
 
 val LocalApplePalette = staticCompositionLocalOf { AppleLightPalette }
 
 private val LightColors = lightColorScheme(
-    primary = Color(0xFF007AFF),
+    primary = Color(0xFF5B3FE0),
     onPrimary = Color.White,
-    primaryContainer = Color(0xFFE5F0FF),
-    onPrimaryContainer = Color(0xFF003875),
-    secondary = Color(0xFF8E8E93),
+    primaryContainer = Color(0xFFEDE9FF),
+    onPrimaryContainer = Color(0xFF1A0066),
+    secondary = Color(0xFF7A7589),
     onSecondary = Color.White,
     background = Color(0xFFFFFFFF),
-    onBackground = Color(0xFF000000),
+    onBackground = Color(0xFF0E0C14),
     surface = Color(0xFFFFFFFF),
-    onSurface = Color(0xFF000000),
-    surfaceVariant = Color(0xFFF2F2F7),
-    onSurfaceVariant = Color(0xFF6C6C70),
-    outlineVariant = Color(0xFFC6C6C8),
-    error = Color(0xFFFF3B30),
+    onSurface = Color(0xFF0E0C14),
+    surfaceVariant = Color(0xFFF5F3FA),
+    onSurfaceVariant = Color(0xFF7A7589),
+    outlineVariant = Color(0xFFD9D5E3),
+    error = Color(0xFFF2475A),
     onError = Color.White
 )
 
 private val DarkColors = darkColorScheme(
-    primary = Color(0xFF0A84FF),
+    primary = Color(0xFF8E7BFF),
     onPrimary = Color.White,
-    primaryContainer = Color(0xFF0A3B7A),
-    onPrimaryContainer = Color(0xFFD6E8FF),
-    secondary = Color(0xFF8E8E93),
+    primaryContainer = Color(0xFF3D2DB8),
+    onPrimaryContainer = Color(0xFFE5E0FF),
+    secondary = Color(0xFF9A95A8),
     onSecondary = Color.Black,
     background = Color(0xFF000000),
-    onBackground = Color(0xFFFFFFFF),
-    surface = Color(0xFF1C1C1E),
-    onSurface = Color(0xFFFFFFFF),
-    surfaceVariant = Color(0xFF2C2C2E),
-    onSurfaceVariant = Color(0xFF8E8E93),
-    outlineVariant = Color(0xFF38383A),
-    error = Color(0xFFFF453A),
+    onBackground = Color(0xFFF5F3FA),
+    surface = Color(0xFF15141A),
+    onSurface = Color(0xFFF5F3FA),
+    surfaceVariant = Color(0xFF211F29),
+    onSurfaceVariant = Color(0xFF9A95A8),
+    outlineVariant = Color(0xFF2E2B38),
+    error = Color(0xFFFF5A6B),
     onError = Color.White
 )
 
 object TelviqueColors {
-    val AppleBlue = Color(0xFF007AFF)
-    val AppleBlueDark = Color(0xFF0A84FF)
-    val CallGreen = Color(0xFF34C759)
-    val CallRed = Color(0xFFFF3B30)
-    val MissedRed = Color(0xFFFF3B30)
-    val IncomingBlue = Color(0xFF007AFF)
-    val OutgoingGreen = Color(0xFF34C759)
+    val AppleBlue = Color(0xFF5B3FE0)      // light accent (Velvet Ink violet)
+    val AppleBlueDark = Color(0xFF8E7BFF)  // dark accent
+    val CallGreen = Color(0xFF2FBF71)
+    val CallRed = Color(0xFFF2475A)
+    val MissedRed = Color(0xFFF2475A)
+    val IncomingBlue = Color(0xFF5B3FE0)
+    val OutgoingGreen = Color(0xFF2FBF71)
     val FavoriteGold = Color(0xFFFFCC00)
 }
 
@@ -138,6 +140,7 @@ fun TelviqueTheme(
     CompositionLocalProvider(LocalApplePalette provides palette) {
         MaterialTheme(
             colorScheme = colorScheme,
+            typography = VelvetInkTypography,
             content = content
         )
     }

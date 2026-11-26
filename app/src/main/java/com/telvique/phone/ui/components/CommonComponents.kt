@@ -56,14 +56,16 @@ import com.telvique.phone.ui.icons.ApplePhoneIcons
 import com.telvique.phone.ui.theme.LocalApplePalette
 import kotlin.math.absoluteValue
 
+// Velvet Ink avatar palette — 8 colours, stable hash → same name = same colour
 private val AppleAvatarGradients = listOf(
-    Color(0xFF9EA5B1) to Color(0xFF7D838F),
-    Color(0xFF5AC8FA) to Color(0xFF007AFF),
-    Color(0xFF64D2FF) to Color(0xFF5E5CE6),
-    Color(0xFF34C759) to Color(0xFF00A86B),
-    Color(0xFFFF9F0A) to Color(0xFFFF6B00),
-    Color(0xFFFF6482) to Color(0xFFFF2D55),
-    Color(0xFFBF5AF2) to Color(0xFF8944AB),
+    Color(0xFF7B5CF0) to Color(0xFF5B3FE0), // violet
+    Color(0xFF6366F1) to Color(0xFF4338CA), // indigo
+    Color(0xFF8B5CF6) to Color(0xFF7C3AED), // purple
+    Color(0xFF06B6D4) to Color(0xFF0E7490), // cyan/teal
+    Color(0xFF14B8A6) to Color(0xFF0D9488), // teal
+    Color(0xFFF43F5E) to Color(0xFFBE123C), // rose
+    Color(0xFFFB7185) to Color(0xFFE11D48), // pink-rose
+    Color(0xFFA78BFA) to Color(0xFF7C3AED), // lavender
 )
 
 fun posterColorsForName(name: String): Pair<Color, Color> =
