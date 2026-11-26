@@ -163,8 +163,12 @@ object CallManager {
     @SuppressLint("MissingPermission")
     @Suppress("DEPRECATION")
     fun updateAudioState(audioState: CallAudioState) {
-        val btName = audioState.activeBluetoothDevice?.name
-            ?: audioState.supportedBluetoothDevices.firstOrNull()?.name
+        val btName = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            audioState.activeBluetoothDevice?.name
+                ?: audioState.supportedBluetoothDevices.firstOrNull()?.name
+        } else {
+            null
+        }
         _uiState.update { current ->
             current.copy(
                 audioState = CallAudioUiState(
