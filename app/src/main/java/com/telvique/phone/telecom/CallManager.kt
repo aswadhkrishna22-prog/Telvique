@@ -377,7 +377,11 @@ object CallManager {
             val resolved = resolvedContacts[number]
             val isConference = details.hasProperty(Call.Details.PROPERTY_CONFERENCE)
             val resolvedName = resolved?.first?.takeIf { it.isNotBlank() }
-            val contactName = details.contactDisplayName?.takeIf { it.isNotBlank() }
+            val contactName = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                details.contactDisplayName?.takeIf { it.isNotBlank() }
+            } else {
+                null
+            }
             val callerName = details.callerDisplayName?.takeIf { it.isNotBlank() }
             val displayName = when {
                 isConference -> "Conference Call"
