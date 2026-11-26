@@ -27,7 +27,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.VolumeUp
-import androidx.compose.material.icons.rounded.AddCall
+import androidx.compose.material.icons.rounded.AddIcCall
 import androidx.compose.material.icons.rounded.BluetoothAudio
 import androidx.compose.material.icons.rounded.Call
 import androidx.compose.material.icons.rounded.CallEnd
@@ -582,7 +582,7 @@ private fun InCallControlsGrid(
                 )
             } else {
                 CallControlTile(
-                    icon = Icons.Rounded.AddCall,
+                    icon = Icons.Rounded.AddIcCall,
                     label = "Add call",
                     active = false,
                     onClick = onAddCall

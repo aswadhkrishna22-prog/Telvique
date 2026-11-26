@@ -8,7 +8,7 @@ android {
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "com.telvique.phone"
+        applicationId = "com.telvique.call"
         minSdk = 26
         targetSdk = 35
         versionCode = 1

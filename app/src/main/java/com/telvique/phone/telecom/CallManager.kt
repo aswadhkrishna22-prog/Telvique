@@ -282,11 +282,14 @@ object CallManager {
             val number = extractNumber(call)
             val resolved = resolvedContacts[number]
             val isConference = details.hasProperty(Call.Details.PROPERTY_CONFERENCE)
+            val resolvedName = resolved?.first?.takeIf { it.isNotBlank() }
+            val contactName = details.contactDisplayName?.takeIf { it.isNotBlank() }
+            val callerName = details.callerDisplayName?.takeIf { it.isNotBlank() }
             val displayName = when {
                 isConference -> "Conference Call"
-                !resolved?.first.isNullOrBlank() -> resolved!!.first!!
-                !details.contactDisplayName.isNullOrBlank() -> details.contactDisplayName
-                !details.callerDisplayName.isNullOrBlank() -> details.callerDisplayName
+                resolvedName != null -> resolvedName
+                contactName != null -> contactName
+                callerName != null -> callerName
                 number.isNotBlank() -> number
                 else -> "Unknown Caller"
             }

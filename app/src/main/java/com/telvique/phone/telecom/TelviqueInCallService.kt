@@ -30,7 +30,7 @@ class TelviqueInCallService : InCallService() {
     }
 
     override fun onCallRemoved(call: Call) {
-        super.onCallRemoved(this, call)
+        super.onCallRemoved(call)
         CallManager.onCallRemoved(this, call)
     }
 
