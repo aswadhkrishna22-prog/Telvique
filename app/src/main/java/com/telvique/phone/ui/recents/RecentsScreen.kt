@@ -28,7 +28,6 @@ import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.PersonAdd
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.VisibilityOff
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -101,7 +100,6 @@ fun RecentsScreen(
     onOpenSettings: () -> Unit,
     onCallNumber: (String) -> Unit,
     onDeleteEntries: (List<Long>) -> Unit,
-    onClearAll: () -> Unit,
     onToggleBlock: (String, Boolean) -> Unit,
 ) {
     val context = LocalContext.current
@@ -109,7 +107,6 @@ fun RecentsScreen(
     val hazeState = remember { HazeState() }
     val listState = rememberLazyListState()
     var showFilterMenu by remember { mutableStateOf(false) }
-    var showClearDialog by remember { mutableStateOf(false) }
     var infoTarget by remember { mutableStateOf<GroupedCallLogItem?>(null) }
     var revealedGroupIds by remember { mutableStateOf(emptySet<Long>()) }
     var detailRevealed by remember { mutableStateOf(false) }
@@ -213,18 +210,6 @@ fun RecentsScreen(
                                     onClick = {
                                         onLayoutModeChange(mode)
                                         showFilterMenu = false
-                                    }
-                                )
-                            }
-                            if (callLogs.isNotEmpty()) {
-                                HorizontalDivider(color = palette.separator.copy(alpha = 0.5f))
-                                DropdownMenuItem(
-                                    text = {
-                                        Text("Clear All Recents", color = palette.callRed)
-                                    },
-                                    onClick = {
-                                        showFilterMenu = false
-                                        showClearDialog = true
                                     }
                                 )
                             }
@@ -704,32 +689,6 @@ fun RecentsScreen(
                 Spacer(modifier = Modifier.height(24.dp))
             }
         }
-    }
-
-    if (showClearDialog) {
-        AlertDialog(
-            onDismissRequest = { showClearDialog = false },
-            containerColor = palette.cardSurface,
-            titleContentColor = palette.label,
-            textContentColor = palette.secondaryLabel,
-            title = { Text("Clear All Recents?", fontWeight = FontWeight.SemiBold) },
-            text = { Text("This removes all recent call entries from your device call log.") },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        showClearDialog = false
-                        onClearAll()
-                    }
-                ) {
-                    Text("Clear All", color = palette.callRed, fontWeight = FontWeight.SemiBold)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showClearDialog = false }) {
-                    Text("Cancel", color = palette.accentBlue)
-                }
-            }
-        )
     }
 }
 

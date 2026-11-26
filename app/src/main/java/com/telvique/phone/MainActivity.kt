@@ -40,17 +40,21 @@ import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -58,6 +62,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -72,7 +77,9 @@ import com.telvique.phone.telecom.CallManager
 import com.telvique.phone.telecom.CallNotificationHelper
 import com.telvique.phone.telecom.CallPhase
 import com.telvique.phone.ui.MainViewModel
+import com.telvique.phone.ui.PendingCallUndoState
 import com.telvique.phone.ui.call.CallActivity
+import kotlinx.coroutines.delay
 import com.telvique.phone.ui.components.SetupPromptBanner
 import com.telvique.phone.ui.components.SimPickerDialog
 import com.telvique.phone.ui.contacts.ContactsScreen
@@ -171,6 +178,7 @@ private fun TelviqueMainRoot(
     val isAppLocked by viewModel.isAppLocked.collectAsStateWithLifecycle()
     val canAuthenticateDevice by viewModel.canAuthenticateDevice.collectAsStateWithLifecycle()
     val maskRevealResetTrigger by viewModel.maskRevealResetTrigger.collectAsStateWithLifecycle()
+    val pendingUndo by viewModel.pendingCallUndo.collectAsStateWithLifecycle()
     val lifecycleOwner = LocalLifecycleOwner.current
 
     var unifiedTab by rememberSaveable { mutableStateOf(UnifiedTab.KEYPAD) }
@@ -475,7 +483,6 @@ private fun TelviqueMainRoot(
                                     onOpenSettings = { showUnifiedSettings = true },
                                     onCallNumber = { viewModel.callNumber(it) },
                                     onDeleteEntries = viewModel::deleteCallLogs,
-                                    onClearAll = viewModel::clearCallLogs,
                                     onToggleBlock = { number, block ->
                                         if (block) viewModel.blockNumber(number) else viewModel.unblockNumber(number)
                                     }
@@ -551,7 +558,6 @@ private fun TelviqueMainRoot(
                                     onOpenSettings = { classicTab = ClassicTab.SETTINGS },
                                     onCallNumber = { viewModel.callNumber(it) },
                                     onDeleteEntries = viewModel::deleteCallLogs,
-                                    onClearAll = viewModel::clearCallLogs,
                                     onToggleBlock = { number, block ->
                                         if (block) viewModel.blockNumber(number) else viewModel.unblockNumber(number)
                                     }
@@ -617,7 +623,12 @@ private fun TelviqueMainRoot(
                                     onToggleAppLock = viewModel::setAppLockEnabled,
                                     onLockGraceChange = viewModel::setLockGraceSeconds,
                                     onToggleHideInRecents = viewModel::setHideInRecents,
-                                    onToggleMaskNumbers = viewModel::setMaskNumbers
+                                    onToggleMaskNumbers = viewModel::setMaskNumbers,
+                                    deletedCallLogs = uiState.deletedCallLogs,
+                                    onClearAllCallLogs = viewModel::clearCallLogs,
+                                    onRestoreDeletedCall = { viewModel.restoreDeletedCallRecords(listOf(it)) },
+                                    onRestoreAllDeletedCalls = { viewModel.restoreDeletedCallRecords(uiState.deletedCallLogs) },
+                                    onEmptyDeletedCache = viewModel::emptyDeletedCallCache
                                 )
                             }
                             }
@@ -732,7 +743,12 @@ private fun TelviqueMainRoot(
                     onToggleAppLock = viewModel::setAppLockEnabled,
                     onLockGraceChange = viewModel::setLockGraceSeconds,
                     onToggleHideInRecents = viewModel::setHideInRecents,
-                    onToggleMaskNumbers = viewModel::setMaskNumbers
+                    onToggleMaskNumbers = viewModel::setMaskNumbers,
+                    deletedCallLogs = uiState.deletedCallLogs,
+                    onClearAllCallLogs = viewModel::clearCallLogs,
+                    onRestoreDeletedCall = { viewModel.restoreDeletedCallRecords(listOf(it)) },
+                    onRestoreAllDeletedCalls = { viewModel.restoreDeletedCallRecords(uiState.deletedCallLogs) },
+                    onEmptyDeletedCache = viewModel::emptyDeletedCallCache
                 )
             }
 
@@ -750,6 +766,29 @@ private fun TelviqueMainRoot(
                     onCallNumber = { viewModel.callNumber(it) },
                     onDismiss = { showUnifiedSearch = false }
                 )
+            }
+
+            // 10-second Floating Undo Bar
+            val activeUndo = pendingUndo
+            AnimatedVisibility(
+                visible = activeUndo != null,
+                enter = fadeIn(),
+                exit = fadeOut(),
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(
+                        start = 16.dp,
+                        end = 16.dp,
+                        bottom = if (showUnifiedSettings || showUnifiedSearch) navBarBottomDp + 16.dp else bottomBarReservedHeight + 10.dp
+                    )
+            ) {
+                if (activeUndo != null) {
+                    CallUndoBannerPill(
+                        undoState = activeUndo,
+                        onUndo = viewModel::undoLastCallDeletion,
+                        onDismiss = viewModel::dismissUndoBanner
+                    )
+                }
             }
         }
     }
@@ -845,6 +884,67 @@ private fun TelviqueLockOverlay(
                 fontSize = 16.sp,
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.padding(horizontal = 18.dp, vertical = 4.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun CallUndoBannerPill(
+    undoState: PendingCallUndoState,
+    onUndo: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    val palette = LocalApplePalette.current
+    var secondsLeft by remember(undoState.token) { mutableIntStateOf(10) }
+
+    LaunchedEffect(undoState.token) {
+        while (secondsLeft > 1) {
+            delay(1_000L)
+            secondsLeft -= 1
+        }
+    }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .shadow(10.dp, RoundedCornerShape(18.dp))
+            .clip(RoundedCornerShape(18.dp))
+            .background(palette.cardSurface)
+            .padding(start = 14.dp, end = 6.dp, top = 8.dp, bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            imageVector = Icons.Rounded.DeleteOutline,
+            contentDescription = null,
+            tint = palette.callRed,
+            modifier = Modifier.size(18.dp)
+        )
+        Spacer(modifier = Modifier.width(10.dp))
+        Text(
+            text = undoState.message,
+            color = palette.label,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Medium,
+            modifier = Modifier.weight(1f)
+        )
+        TextButton(onClick = onUndo) {
+            Text(
+                text = "Undo (${secondsLeft}s)",
+                color = palette.accentBlue,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
+        IconButton(
+            onClick = onDismiss,
+            modifier = Modifier.size(30.dp)
+        ) {
+            Icon(
+                imageVector = ApplePhoneIcons.XMark,
+                contentDescription = "Dismiss",
+                tint = palette.tertiaryLabel,
+                modifier = Modifier.size(15.dp)
             )
         }
     }

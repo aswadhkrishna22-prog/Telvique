@@ -13,6 +13,8 @@ import com.telvique.phone.TelviqueApp
 import com.telvique.phone.data.CallLogItem
 import com.telvique.phone.data.CallLogType
 import com.telvique.phone.data.ContactItem
+import com.telvique.phone.data.DeletedCallCache
+import com.telvique.phone.data.DeletedCallRecord
 import com.telvique.phone.data.PhoneLayoutMode
 import com.telvique.phone.data.PhoneRepository
 import com.telvique.phone.data.RecentsFilter
@@ -20,6 +22,8 @@ import com.telvique.phone.data.SimAccountInfo
 import com.telvique.phone.data.T9Matcher
 import com.telvique.phone.data.TelviqueSettings
 import com.telvique.phone.security.BiometricAuthHelper
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -29,11 +33,18 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
+data class PendingCallUndoState(
+    val token: Long,
+    val message: String,
+    val records: List<DeletedCallRecord>
+)
+
 data class MainUiState(
     val dialerInput: String = "",
     val contacts: List<ContactItem> = emptyList(),
     val t9Matches: List<ContactItem> = emptyList(),
     val callLogs: List<CallLogItem> = emptyList(),
+    val deletedCallLogs: List<DeletedCallRecord> = emptyList(),
     val recentsFilter: RecentsFilter = RecentsFilter.ALL,
     val recentsQuery: String = "",
     val contactsQuery: String = "",
@@ -73,11 +84,13 @@ data class MainUiState(
 class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val repo = PhoneRepository(application)
+    private val deletedCallCache = DeletedCallCache(application)
     private val settingsRepo = (application as TelviqueApp).settingsRepository
 
     private val dialerInput = MutableStateFlow("")
     private val contactsFlow = MutableStateFlow<List<ContactItem>>(emptyList())
     private val callLogsFlow = MutableStateFlow<List<CallLogItem>>(emptyList())
+    private val deletedCallLogsFlow = MutableStateFlow<List<DeletedCallRecord>>(emptyList())
     private val recentsFilter = MutableStateFlow(RecentsFilter.ALL)
     private val recentsQuery = MutableStateFlow("")
     private val contactsQuery = MutableStateFlow("")
@@ -107,6 +120,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val canAuthenticateDevice: StateFlow<Boolean> = _canAuthenticateDevice.asStateFlow()
     private val _maskRevealResetTrigger = MutableStateFlow(0)
     val maskRevealResetTrigger: StateFlow<Int> = _maskRevealResetTrigger.asStateFlow()
+    private val _pendingCallUndo = MutableStateFlow<PendingCallUndoState?>(null)
+    val pendingCallUndo: StateFlow<PendingCallUndoState?> = _pendingCallUndo.asStateFlow()
+    private var undoDismissJob: Job? = null
 
     private data class CoreListsState(
         val dialerInput: String,
@@ -149,7 +165,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         auxiliaryFlow,
         pendingSimChoiceNumber,
         systemBlockedNumbersFlow,
-    ) { core, aux, simChoiceNumber, systemBlocked ->
+        deletedCallLogsFlow,
+    ) { core, aux, simChoiceNumber, systemBlocked, deletedLogs ->
         val t9 = if (core.dialerInput.isBlank()) {
             emptyList()
         } else {
@@ -161,6 +178,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             contacts = core.contacts,
             t9Matches = t9,
             callLogs = core.callLogs,
+            deletedCallLogs = deletedLogs,
             recentsFilter = core.recentsFilter,
             recentsQuery = core.recentsQuery,
             contactsQuery = aux.contactsQuery,
@@ -281,6 +299,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             contactsFlow.value = repo.loadContacts()
             callLogsFlow.value = repo.loadCallLogs()
+            deletedCallLogsFlow.value = deletedCallCache.loadAll()
             systemBlockedNumbersFlow.value = repo.loadSystemBlockedNumbers()
         }
     }
@@ -370,30 +389,92 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun deleteCallLog(id: Long) {
-        viewModelScope.launch {
-            if (repo.deleteCallLogEntry(id)) {
-                callLogsFlow.value = repo.loadCallLogs()
-            }
-        }
+        deleteCallLogs(listOf(id))
     }
 
     fun deleteCallLogs(ids: List<Long>) {
         viewModelScope.launch {
+            val idSet = ids.toSet()
+            val toArchive = callLogsFlow.value.filter { it.id in idSet }
             var deletedAny = false
             ids.forEach { id ->
                 if (repo.deleteCallLogEntry(id)) deletedAny = true
             }
             if (deletedAny) {
                 callLogsFlow.value = repo.loadCallLogs()
+                if (toArchive.isNotEmpty()) {
+                    val added = deletedCallCache.addDeletedCalls(toArchive)
+                    deletedCallLogsFlow.value = deletedCallCache.loadAll()
+                    val label = if (added.size == 1) "Deleted 1 call" else "Deleted ${added.size} calls"
+                    scheduleUndoBanner(label, added)
+                }
             }
         }
     }
 
     fun clearCallLogs() {
         viewModelScope.launch {
+            val snapshot = repo.loadCallLogs(limit = 1500)
             if (repo.clearAllCallLogs()) {
                 callLogsFlow.value = emptyList()
+                if (snapshot.isNotEmpty()) {
+                    val added = deletedCallCache.addDeletedCalls(snapshot)
+                    deletedCallLogsFlow.value = deletedCallCache.loadAll()
+                    scheduleUndoBanner(
+                        message = "Cleared ${added.size} calls • Saved 30d",
+                        records = added
+                    )
+                }
             }
+        }
+    }
+
+    private fun scheduleUndoBanner(message: String, records: List<DeletedCallRecord>) {
+        if (records.isEmpty()) return
+        undoDismissJob?.cancel()
+        val token = SystemClock.elapsedRealtime()
+        _pendingCallUndo.value = PendingCallUndoState(token, message, records)
+        undoDismissJob = viewModelScope.launch {
+            delay(10_000L)
+            if (_pendingCallUndo.value?.token == token) {
+                _pendingCallUndo.value = null
+            }
+        }
+    }
+
+    fun undoLastCallDeletion() {
+        val pending = _pendingCallUndo.value ?: return
+        undoDismissJob?.cancel()
+        _pendingCallUndo.value = null
+        viewModelScope.launch {
+            repo.restoreCallLogEntries(pending.records)
+            deletedCallCache.removeRecords(pending.records.map { it.cacheId }.toSet())
+            callLogsFlow.value = repo.loadCallLogs()
+            deletedCallLogsFlow.value = deletedCallCache.loadAll()
+        }
+    }
+
+    fun dismissUndoBanner() {
+        undoDismissJob?.cancel()
+        _pendingCallUndo.value = null
+    }
+
+    fun restoreDeletedCallRecords(records: List<DeletedCallRecord>) {
+        if (records.isEmpty()) return
+        viewModelScope.launch {
+            repo.restoreCallLogEntries(records)
+            deletedCallCache.removeRecords(records.map { it.cacheId }.toSet())
+            callLogsFlow.value = repo.loadCallLogs()
+            deletedCallLogsFlow.value = deletedCallCache.loadAll()
+        }
+    }
+
+    fun emptyDeletedCallCache() {
+        undoDismissJob?.cancel()
+        _pendingCallUndo.value = null
+        viewModelScope.launch {
+            deletedCallCache.clearAll()
+            deletedCallLogsFlow.value = emptyList()
         }
     }
 

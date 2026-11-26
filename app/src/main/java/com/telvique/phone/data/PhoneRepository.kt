@@ -220,6 +220,34 @@ class PhoneRepository(private val context: Context) {
         }.getOrDefault(false)
     }
 
+    suspend fun restoreCallLogEntries(records: List<DeletedCallRecord>): Int = withContext(Dispatchers.IO) {
+        if (records.isEmpty() || !hasPermission(Manifest.permission.WRITE_CALL_LOG)) return@withContext 0
+        runCatching {
+            val values = records.map { rec ->
+                ContentValues().apply {
+                    put(CallLog.Calls.NUMBER, rec.number)
+                    put(CallLog.Calls.DATE, rec.timestamp)
+                    put(CallLog.Calls.DURATION, rec.durationSeconds)
+                    put(CallLog.Calls.NEW, 0)
+                    val systemType = when (rec.type) {
+                        CallLogType.INCOMING -> CallLog.Calls.INCOMING_TYPE
+                        CallLogType.OUTGOING -> CallLog.Calls.OUTGOING_TYPE
+                        CallLogType.MISSED -> CallLog.Calls.MISSED_TYPE
+                        CallLogType.REJECTED -> CallLog.Calls.REJECTED_TYPE
+                        CallLogType.BLOCKED -> CallLog.Calls.BLOCKED_TYPE
+                        CallLogType.VOICEMAIL -> CallLog.Calls.VOICEMAIL_TYPE
+                        CallLogType.UNKNOWN -> CallLog.Calls.INCOMING_TYPE
+                    }
+                    put(CallLog.Calls.TYPE, systemType)
+                    if (!rec.cachedName.isNullOrBlank()) {
+                        put(CallLog.Calls.CACHED_NAME, rec.cachedName)
+                    }
+                }
+            }.toTypedArray()
+            resolver.bulkInsert(CallLog.Calls.CONTENT_URI, values)
+        }.getOrDefault(0)
+    }
+
     suspend fun setContactStarred(contactId: Long, starred: Boolean): Boolean = withContext(Dispatchers.IO) {
         if (!hasPermission(Manifest.permission.WRITE_CONTACTS)) return@withContext false
         runCatching {

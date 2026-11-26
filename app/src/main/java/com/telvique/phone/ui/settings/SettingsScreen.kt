@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -36,9 +37,11 @@ import androidx.compose.material.icons.rounded.WarningAmber
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
@@ -60,6 +63,10 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.telvique.phone.BuildConfig
+import com.telvique.phone.data.CallLogType
+import com.telvique.phone.data.DeletedCallCache
+import com.telvique.phone.data.DeletedCallRecord
+import com.telvique.phone.data.PhoneFormatUtils
 import com.telvique.phone.data.PhoneLayoutMode
 import com.telvique.phone.data.SimAccountInfo
 import com.telvique.phone.data.TelviqueSettings
@@ -71,6 +78,7 @@ import com.telvique.phone.ui.theme.LocalApplePalette
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.hazeSource
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
     settings: TelviqueSettings,
@@ -97,7 +105,12 @@ fun SettingsScreen(
     onToggleAppLock: (Boolean) -> Unit = {},
     onLockGraceChange: (Int) -> Unit = {},
     onToggleHideInRecents: (Boolean) -> Unit = {},
-    onToggleMaskNumbers: (Boolean) -> Unit = {}
+    onToggleMaskNumbers: (Boolean) -> Unit = {},
+    deletedCallLogs: List<DeletedCallRecord> = emptyList(),
+    onClearAllCallLogs: () -> Unit = {},
+    onRestoreDeletedCall: (DeletedCallRecord) -> Unit = {},
+    onRestoreAllDeletedCalls: () -> Unit = {},
+    onEmptyDeletedCache: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val palette = LocalApplePalette.current
@@ -108,6 +121,9 @@ fun SettingsScreen(
     var editingSpeedDialDigit by remember { mutableStateOf<String?>(null) }
     var showLockGraceDialog by remember { mutableStateOf(false) }
     var showNoDeviceLockDialog by remember { mutableStateOf(false) }
+    var showClearHistoryWarning by remember { mutableStateOf(false) }
+    var showDeletedTrashSheet by remember { mutableStateOf(false) }
+    var showEmptyTrashWarning by remember { mutableStateOf(false) }
     val canFullScreen = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
         context.getSystemService(NotificationManager::class.java)?.canUseFullScreenIntent() == true
     } else {
@@ -448,6 +464,75 @@ fun SettingsScreen(
                         checked = settings.maskNumbers,
                         onCheckedChange = onToggleMaskNumbers
                     )
+                }
+            }
+
+            // Call History & 30-Day Recently Deleted Cache
+            item(key = "call_history_section") {
+                AppleSectionHeader("Call History")
+                AppleGroupedCard {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { showDeletedTrashSheet = true }
+                            .padding(horizontal = 16.dp, vertical = 13.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Recently Deleted (30 Days)",
+                                color = palette.label,
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Text(
+                                text = "Restore calls deleted or cleared in the last 30 days",
+                                color = palette.secondaryLabel,
+                                fontSize = 13.sp
+                            )
+                        }
+                        Text(
+                            text = if (deletedCallLogs.isEmpty()) "Empty" else "${deletedCallLogs.size}",
+                            color = palette.accentBlue,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Icon(
+                            imageVector = ApplePhoneIcons.ChevronRight,
+                            contentDescription = null,
+                            tint = palette.tertiaryLabel,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                    AppleInsetDivider()
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { showClearHistoryWarning = true }
+                            .padding(horizontal = 16.dp, vertical = 13.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Clear All Call History",
+                                color = palette.callRed,
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Text(
+                                text = "10s Undo available + kept in 30-day recovery cache",
+                                color = palette.secondaryLabel,
+                                fontSize = 13.sp
+                            )
+                        }
+                        Icon(
+                            imageVector = Icons.Rounded.DeleteOutline,
+                            contentDescription = null,
+                            tint = palette.callRed,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
                 }
             }
 
@@ -868,6 +953,180 @@ fun SettingsScreen(
             confirmButton = {
                 TextButton(onClick = { showNoDeviceLockDialog = false }) {
                     Text("OK", color = palette.accentBlue, fontWeight = FontWeight.SemiBold)
+                }
+            }
+        )
+    }
+
+    if (showClearHistoryWarning) {
+        AlertDialog(
+            onDismissRequest = { showClearHistoryWarning = false },
+            containerColor = palette.cardSurface,
+            titleContentColor = palette.label,
+            textContentColor = palette.secondaryLabel,
+            icon = {
+                Icon(
+                    imageVector = Icons.Rounded.WarningAmber,
+                    contentDescription = null,
+                    tint = palette.callRed
+                )
+            },
+            title = { Text("Clear All Call History?", fontWeight = FontWeight.SemiBold) },
+            text = {
+                Text(
+                    "Warning: This clears your recent call log from this device.\n\n" +
+                        "You will get a 10-second Undo button immediately, and cleared calls stay recoverable in Recently Deleted for 30 days."
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showClearHistoryWarning = false
+                        onClearAllCallLogs()
+                    }
+                ) {
+                    Text("Clear All", color = palette.callRed, fontWeight = FontWeight.SemiBold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearHistoryWarning = false }) {
+                    Text("Cancel", color = palette.accentBlue)
+                }
+            }
+        )
+    }
+
+    if (showDeletedTrashSheet) {
+        val nowMillis = remember(deletedCallLogs.size) { System.currentTimeMillis() }
+        ModalBottomSheet(
+            onDismissRequest = { showDeletedTrashSheet = false },
+            containerColor = palette.cardSurface
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 8.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Recently Deleted (30d)",
+                        color = palette.label,
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.weight(1f)
+                    )
+                    if (deletedCallLogs.isNotEmpty()) {
+                        TextButton(
+                            onClick = {
+                                onRestoreAllDeletedCalls()
+                                showDeletedTrashSheet = false
+                            }
+                        ) {
+                            Text("Restore All", color = palette.accentBlue, fontWeight = FontWeight.SemiBold)
+                        }
+                        TextButton(onClick = { showEmptyTrashWarning = true }) {
+                            Text("Empty", color = palette.callRed, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(6.dp))
+                if (deletedCallLogs.isEmpty()) {
+                    Text(
+                        text = "No deleted calls cached in the last 30 days.",
+                        color = palette.secondaryLabel,
+                        fontSize = 15.sp,
+                        modifier = Modifier.padding(vertical = 28.dp)
+                    )
+                } else {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(360.dp)
+                    ) {
+                        itemsIndexed(deletedCallLogs, key = { _, rec -> rec.cacheId }) { idx, record ->
+                            val remainingMs = (DeletedCallCache.RETENTION_MILLIS - (nowMillis - record.deletedAtMillis)).coerceAtLeast(0L)
+                            val daysLeft = ((remainingMs / (24L * 60L * 60L * 1000L)) + 1L).coerceAtMost(30L)
+                            val isUnsaved = record.cachedName.isNullOrBlank() && record.number.isNotBlank()
+                            val shownTitle = when {
+                                isUnsaved && settings.maskNumbers -> PhoneFormatUtils.maskPhoneNumber(record.number)
+                                isUnsaved -> PhoneFormatUtils.formatDisplayNumber(record.number)
+                                else -> record.displayTitle
+                            }
+                            val typeLabel = when (record.type) {
+                                CallLogType.OUTGOING -> "Outgoing"
+                                CallLogType.INCOMING -> "Incoming"
+                                CallLogType.MISSED -> "Missed"
+                                CallLogType.REJECTED -> "Declined"
+                                CallLogType.BLOCKED -> "Blocked"
+                                CallLogType.VOICEMAIL -> "Voicemail"
+                                CallLogType.UNKNOWN -> "Call"
+                            }
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = shownTitle,
+                                        color = if (record.type == CallLogType.MISSED || record.type == CallLogType.REJECTED) {
+                                            palette.callRed
+                                        } else {
+                                            palette.label
+                                        },
+                                        fontSize = 15.sp,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    Text(
+                                        text = "$typeLabel • ${PhoneFormatUtils.formatRelativeTime(record.timestamp)} • ${daysLeft}d left",
+                                        color = palette.secondaryLabel,
+                                        fontSize = 12.sp
+                                    )
+                                }
+                                TextButton(onClick = { onRestoreDeletedCall(record) }) {
+                                    Text("Restore", color = palette.accentBlue, fontWeight = FontWeight.SemiBold)
+                                }
+                            }
+                            if (idx < deletedCallLogs.lastIndex) {
+                                HorizontalDivider(
+                                    thickness = 0.5.dp,
+                                    color = palette.separator.copy(alpha = 0.45f)
+                                )
+                            }
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+            }
+        }
+    }
+
+    if (showEmptyTrashWarning) {
+        AlertDialog(
+            onDismissRequest = { showEmptyTrashWarning = false },
+            containerColor = palette.cardSurface,
+            titleContentColor = palette.label,
+            textContentColor = palette.secondaryLabel,
+            title = { Text("Empty 30-Day Cache?", fontWeight = FontWeight.SemiBold) },
+            text = { Text("Permanently remove all cached deleted calls? They cannot be recovered after this.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showEmptyTrashWarning = false
+                        showDeletedTrashSheet = false
+                        onEmptyDeletedCache()
+                    }
+                ) {
+                    Text("Empty", color = palette.callRed, fontWeight = FontWeight.SemiBold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showEmptyTrashWarning = false }) {
+                    Text("Cancel", color = palette.accentBlue)
                 }
             }
         )
