@@ -6,7 +6,9 @@ import com.telvique.phone.data.SettingsRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 class TelviqueCallScreeningService : CallScreeningService() {
 
@@ -15,9 +17,12 @@ class TelviqueCallScreeningService : CallScreeningService() {
     override fun onScreenCall(callDetails: Call.Details) {
         val number = callDetails.handle?.schemeSpecificPart.orEmpty()
         scope.launch {
-            val blocked = runCatching {
-                SettingsRepository(applicationContext).isBlocked(number)
-            }.getOrDefault(false)
+            // Android requires respondToCall() within 5 seconds; guard with a 3s timeout.
+            val blocked = withTimeoutOrNull(3_000L) {
+                runCatching {
+                    SettingsRepository(applicationContext).isBlocked(number)
+                }.getOrDefault(false)
+            } ?: false
 
             val response = if (blocked) {
                 CallResponse.Builder()
@@ -33,5 +38,10 @@ class TelviqueCallScreeningService : CallScreeningService() {
             }
             respondToCall(callDetails, response)
         }
+    }
+
+    override fun onDestroy() {
+        scope.cancel()
+        super.onDestroy()
     }
 }

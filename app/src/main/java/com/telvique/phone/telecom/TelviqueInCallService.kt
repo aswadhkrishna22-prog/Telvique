@@ -1,10 +1,16 @@
 package com.telvique.phone.telecom
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.PowerManager
 import android.telecom.Call
 import android.telecom.CallAudioState
+import android.telecom.CallEndpoint
 import android.telecom.InCallService
+import androidx.annotation.RequiresApi
+import androidx.core.content.ContextCompat
 import com.telvique.phone.ui.call.CallActivity
 
 class TelviqueInCallService : InCallService() {
@@ -26,7 +32,22 @@ class TelviqueInCallService : InCallService() {
     override fun onCallAdded(call: Call) {
         super.onCallAdded(call)
         CallManager.onCallAdded(this, call)
-        launchCallScreen()
+
+        val state = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            call.details.state
+        } else {
+            @Suppress("DEPRECATION")
+            call.state
+        }
+        val canPostNotifications = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) ==
+            PackageManager.PERMISSION_GRANTED
+
+        // Incoming ringing calls use CallStyle + fullScreenIntent notifications when allowed,
+        // avoiding direct background Activity launches. Outgoing calls open CallActivity directly.
+        if (state != Call.STATE_RINGING || !canPostNotifications) {
+            launchCallScreen()
+        }
     }
 
     override fun onCallRemoved(call: Call) {
@@ -34,12 +55,38 @@ class TelviqueInCallService : InCallService() {
         CallManager.onCallRemoved(this, call)
     }
 
+    override fun onBringToForeground(showDialpad: Boolean) {
+        super.onBringToForeground(showDialpad)
+        launchCallScreen()
+    }
+
     @Deprecated("Deprecated in Android API 34")
     override fun onCallAudioStateChanged(audioState: CallAudioState) {
         @Suppress("DEPRECATION")
         super.onCallAudioStateChanged(audioState)
-        CallManager.updateAudioState(audioState)
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            CallManager.updateAudioState(audioState)
+            updateProximityWakeLock()
+        }
+    }
+
+    @RequiresApi(Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
+    override fun onCallEndpointChanged(callEndpoint: CallEndpoint) {
+        super.onCallEndpointChanged(callEndpoint)
+        CallManager.updateCallEndpoint(callEndpoint)
         updateProximityWakeLock()
+    }
+
+    @RequiresApi(Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
+    override fun onAvailableCallEndpointsChanged(availableEndpoints: List<CallEndpoint>) {
+        super.onAvailableCallEndpointsChanged(availableEndpoints)
+        CallManager.updateAvailableCallEndpoints(availableEndpoints)
+    }
+
+    @RequiresApi(Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
+    override fun onMuteStateChanged(isMuted: Boolean) {
+        super.onMuteStateChanged(isMuted)
+        CallManager.updateMuteState(isMuted)
     }
 
     fun onCallsUpdated() {

@@ -3,12 +3,16 @@ package com.telvique.phone.telecom
 import android.annotation.SuppressLint
 import android.content.Context
 import android.os.Build
+import android.os.OutcomeReceiver
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
 import android.telecom.Call
 import android.telecom.CallAudioState
+import android.telecom.CallEndpoint
+import android.telecom.CallEndpointException
 import android.telecom.VideoProfile
+import androidx.annotation.RequiresApi
 import com.telvique.phone.data.PhoneRepository
 import com.telvique.phone.data.SettingsRepository
 import kotlinx.coroutines.CoroutineScope
@@ -81,19 +85,23 @@ object CallManager {
     private val callbacksByCall = mutableMapOf<Call, Call.Callback>()
     private var nextCallId = 1
     private val connectedVibratedCallIds = mutableSetOf<String>()
+    private var availableEndpoints: List<CallEndpoint> = emptyList()
 
     private val _uiState = MutableStateFlow(TelecomUiState())
     val uiState: StateFlow<TelecomUiState> = _uiState.asStateFlow()
 
     fun attachService(service: TelviqueInCallService) {
         serviceRef = service
-        @Suppress("DEPRECATION")
-        service.callAudioState?.let { updateAudioState(it) }
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            @Suppress("DEPRECATION")
+            service.callAudioState?.let { updateAudioState(it) }
+        }
     }
 
     fun detachService(service: TelviqueInCallService) {
         if (serviceRef === service) {
             serviceRef = null
+            availableEndpoints = emptyList()
         }
     }
 
@@ -169,6 +177,54 @@ object CallManager {
         }
     }
 
+    @RequiresApi(Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
+    fun updateCallEndpoint(endpoint: CallEndpoint) {
+        val route = mapEndpointTypeToRoute(endpoint.endpointType)
+        val btName = if (endpoint.endpointType == CallEndpoint.TYPE_BLUETOOTH) {
+            endpoint.endpointName.toString().takeIf { it.isNotBlank() }
+        } else {
+            _uiState.value.audioState.bluetoothDeviceName
+        }
+        _uiState.update { current ->
+            current.copy(
+                audioState = current.audioState.copy(
+                    route = route,
+                    bluetoothDeviceName = btName
+                )
+            )
+        }
+    }
+
+    @RequiresApi(Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
+    fun updateAvailableCallEndpoints(endpoints: List<CallEndpoint>) {
+        availableEndpoints = endpoints
+        var mask = 0
+        var btName: String? = null
+        for (ep in endpoints) {
+            mask = mask or mapEndpointTypeToRoute(ep.endpointType)
+            if (ep.endpointType == CallEndpoint.TYPE_BLUETOOTH && btName == null) {
+                btName = ep.endpointName.toString().takeIf { it.isNotBlank() }
+            }
+        }
+        if (mask == 0) {
+            mask = CallAudioState.ROUTE_EARPIECE or CallAudioState.ROUTE_SPEAKER
+        }
+        _uiState.update { current ->
+            current.copy(
+                audioState = current.audioState.copy(
+                    supportedRouteMask = mask,
+                    bluetoothDeviceName = btName ?: current.audioState.bluetoothDeviceName
+                )
+            )
+        }
+    }
+
+    fun updateMuteState(isMuted: Boolean) {
+        _uiState.update { current ->
+            current.copy(audioState = current.audioState.copy(isMuted = isMuted))
+        }
+    }
+
     fun answer(callId: String? = null) {
         val call = findCall(callId) ?: findCallByPhase(CallPhase.RINGING) ?: return
         call.answer(VideoProfile.STATE_AUDIO_ONLY)
@@ -234,9 +290,43 @@ object CallManager {
         service.setMuted(!currentMuted)
     }
 
-    @Suppress("DEPRECATION")
     fun setAudioRoute(route: Int) {
-        serviceRef?.setAudioRoute(route)
+        val service = serviceRef ?: return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE &&
+            requestEndpointChange(service, route)
+        ) {
+            return
+        }
+        @Suppress("DEPRECATION")
+        service.setAudioRoute(route)
+    }
+
+    @RequiresApi(Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
+    private fun requestEndpointChange(service: TelviqueInCallService, route: Int): Boolean {
+        val targetType = when (route) {
+            CallAudioState.ROUTE_BLUETOOTH -> CallEndpoint.TYPE_BLUETOOTH
+            CallAudioState.ROUTE_WIRED_HEADSET -> CallEndpoint.TYPE_WIRED_HEADSET
+            CallAudioState.ROUTE_SPEAKER -> CallEndpoint.TYPE_SPEAKER
+            else -> CallEndpoint.TYPE_EARPIECE
+        }
+        val endpoint = availableEndpoints.firstOrNull { it.endpointType == targetType } ?: return false
+        service.requestCallEndpointChange(
+            endpoint,
+            service.mainExecutor,
+            object : OutcomeReceiver<Void, CallEndpointException> {
+                override fun onResult(result: Void?) = Unit
+                override fun onError(error: CallEndpointException) = Unit
+            }
+        )
+        return true
+    }
+
+    @RequiresApi(Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
+    private fun mapEndpointTypeToRoute(endpointType: Int): Int = when (endpointType) {
+        CallEndpoint.TYPE_BLUETOOTH -> CallAudioState.ROUTE_BLUETOOTH
+        CallEndpoint.TYPE_WIRED_HEADSET -> CallAudioState.ROUTE_WIRED_HEADSET
+        CallEndpoint.TYPE_SPEAKER -> CallAudioState.ROUTE_SPEAKER
+        else -> CallAudioState.ROUTE_EARPIECE
     }
 
     fun toggleSpeaker() {

@@ -51,7 +51,10 @@ fun SettingsScreen(
     settings: TelviqueSettings,
     simAccounts: List<SimAccountInfo>,
     isDefaultDialer: Boolean,
+    isCallScreeningAvailable: Boolean,
+    isCallScreeningHeld: Boolean,
     onRequestDefaultDialer: () -> Unit,
+    onRequestCallScreening: () -> Unit,
     onToggleDialpadTones: (Boolean) -> Unit,
     onToggleDialpadVibrate: (Boolean) -> Unit,
     onToggleVibrateOnConnect: (Boolean) -> Unit,
@@ -160,6 +163,51 @@ fun SettingsScreen(
                 SectionTitle("Blocked Numbers", modifier = Modifier.weight(1f))
                 IconButton(onClick = { showAddBlockDialog = true }) {
                     Icon(Icons.Rounded.Add, contentDescription = "Block a number")
+                }
+            }
+            if (isCallScreeningAvailable) {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 8.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+                    )
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = if (isCallScreeningHeld) {
+                                    "Call screening active"
+                                } else {
+                                    "Enable call screening"
+                                },
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Text(
+                                text = if (isCallScreeningHeld) {
+                                    "Blocked numbers are screened automatically."
+                                } else {
+                                    "Optional — required by Android to auto-reject blocked numbers."
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        if (!isCallScreeningHeld) {
+                            Spacer(modifier = Modifier.width(8.dp))
+                            TextButton(onClick = onRequestCallScreening) {
+                                Text("Enable")
+                            }
+                        }
+                    }
                 }
             }
             if (settings.blockedNumbers.isEmpty()) {

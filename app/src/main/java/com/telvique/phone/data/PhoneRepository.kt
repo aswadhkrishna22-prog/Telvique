@@ -6,9 +6,11 @@ import android.content.ContentResolver
 import android.content.ContentUris
 import android.content.ContentValues
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.database.ContentObserver
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -16,6 +18,8 @@ import android.provider.CallLog
 import android.provider.ContactsContract
 import android.telecom.PhoneAccountHandle
 import android.telecom.TelecomManager
+import android.telephony.PhoneNumberUtils
+import android.telephony.TelephonyManager
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
@@ -268,22 +272,52 @@ class PhoneRepository(private val context: Context) {
         }.getOrDefault(emptyList())
     }
 
+    fun isEmergencyNumber(number: String): Boolean {
+        val cleaned = number.trim()
+        if (cleaned.isEmpty()) return false
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            runCatching {
+                context.getSystemService(TelephonyManager::class.java)?.isEmergencyNumber(cleaned) == true
+            }.getOrDefault(false)
+        } else {
+            @Suppress("DEPRECATION")
+            PhoneNumberUtils.isEmergencyNumber(cleaned)
+        }
+    }
+
     @SuppressLint("MissingPermission")
     fun placeCall(number: String, accountHandle: PhoneAccountHandle? = null): Boolean {
         val cleaned = number.trim()
-        if (cleaned.isEmpty() || !hasPermission(Manifest.permission.CALL_PHONE)) return false
-        val manager = telecomManager ?: return false
+        if (cleaned.isEmpty()) return false
 
         val uri = Uri.fromParts("tel", cleaned, null)
-        val extras = Bundle().apply {
-            if (accountHandle != null) {
-                putParcelable(TelecomManager.EXTRA_PHONE_ACCOUNT_HANDLE, accountHandle)
+        val emergency = isEmergencyNumber(cleaned)
+        val manager = telecomManager
+
+        if (manager != null && (hasPermission(Manifest.permission.CALL_PHONE) || emergency)) {
+            val extras = Bundle().apply {
+                if (!emergency && accountHandle != null) {
+                    putParcelable(TelecomManager.EXTRA_PHONE_ACCOUNT_HANDLE, accountHandle)
+                }
             }
+            val placed = runCatching {
+                manager.placeCall(uri, extras)
+                true
+            }.getOrDefault(false)
+            if (placed) return true
         }
-        return runCatching {
-            manager.placeCall(uri, extras)
-            true
-        }.getOrDefault(false)
+
+        if (emergency) {
+            return runCatching {
+                val dialIntent = Intent(Intent.ACTION_DIAL, uri).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                context.startActivity(dialIntent)
+                true
+            }.getOrDefault(false)
+        }
+
+        return false
     }
 
     private class MutableContactBuilder(

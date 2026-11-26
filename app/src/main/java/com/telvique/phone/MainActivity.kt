@@ -1,5 +1,6 @@
 package com.telvique.phone
 
+import android.app.Activity
 import android.app.role.RoleManager
 import android.content.Intent
 import android.os.Build
@@ -26,6 +27,7 @@ import androidx.compose.material.icons.rounded.Contacts
 import androidx.compose.material.icons.rounded.Dialpad
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -34,9 +36,11 @@ import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -120,8 +124,25 @@ private fun TelviqueMainRoot(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val telecomState by CallManager.uiState.collectAsStateWithLifecycle()
     var activeTab by rememberSaveable { mutableStateOf(MainTab.KEYPAD) }
+    var showRestrictedSettingsHelp by remember { mutableStateOf(false) }
 
     val roleLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        viewModel.refreshSystemStatus()
+        val granted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            context.getSystemService(RoleManager::class.java)
+                ?.isRoleHeld(RoleManager.ROLE_DIALER) == true
+        } else {
+            context.getSystemService(TelecomManager::class.java)
+                ?.defaultDialerPackage == context.packageName
+        }
+        if (!granted && result.resultCode != Activity.RESULT_OK) {
+            showRestrictedSettingsHelp = true
+        }
+    }
+
+    val screeningRoleLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
     ) {
         viewModel.refreshSystemStatus()
@@ -137,16 +158,40 @@ private fun TelviqueMainRoot(
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val roleManager = context.getSystemService(RoleManager::class.java)
             if (roleManager != null && roleManager.isRoleAvailable(RoleManager.ROLE_DIALER)) {
-                roleLauncher.launch(roleManager.createRequestRoleIntent(RoleManager.ROLE_DIALER))
+                if (roleManager.isRoleHeld(RoleManager.ROLE_DIALER)) {
+                    viewModel.refreshSystemStatus()
+                } else {
+                    roleLauncher.launch(roleManager.createRequestRoleIntent(RoleManager.ROLE_DIALER))
+                }
             }
         } else {
-            val intent = Intent(TelecomManager.ACTION_CHANGE_DEFAULT_DIALER).apply {
-                putExtra(
-                    TelecomManager.EXTRA_CHANGE_DEFAULT_DIALER_PACKAGE_NAME,
-                    context.packageName
-                )
+            val telecom = context.getSystemService(TelecomManager::class.java)
+            if (telecom?.defaultDialerPackage == context.packageName) {
+                viewModel.refreshSystemStatus()
+            } else {
+                val intent = Intent(TelecomManager.ACTION_CHANGE_DEFAULT_DIALER).apply {
+                    putExtra(
+                        TelecomManager.EXTRA_CHANGE_DEFAULT_DIALER_PACKAGE_NAME,
+                        context.packageName
+                    )
+                }
+                roleLauncher.launch(intent)
             }
-            roleLauncher.launch(intent)
+        }
+    }
+
+    val requestCallScreening: () -> Unit = {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val roleManager = context.getSystemService(RoleManager::class.java)
+            if (roleManager != null && roleManager.isRoleAvailable(RoleManager.ROLE_CALL_SCREENING)) {
+                if (roleManager.isRoleHeld(RoleManager.ROLE_CALL_SCREENING)) {
+                    viewModel.refreshSystemStatus()
+                } else {
+                    screeningRoleLauncher.launch(
+                        roleManager.createRequestRoleIntent(RoleManager.ROLE_CALL_SCREENING)
+                    )
+                }
+            }
         }
     }
 
@@ -265,7 +310,10 @@ private fun TelviqueMainRoot(
                     settings = uiState.settings,
                     simAccounts = uiState.simAccounts,
                     isDefaultDialer = uiState.isDefaultDialer,
+                    isCallScreeningAvailable = uiState.isCallScreeningAvailable,
+                    isCallScreeningHeld = uiState.isCallScreeningHeld,
                     onRequestDefaultDialer = requestDefaultDialer,
+                    onRequestCallScreening = requestCallScreening,
                     onToggleDialpadTones = viewModel::setDialpadTones,
                     onToggleDialpadVibrate = viewModel::setDialpadVibrate,
                     onToggleVibrateOnConnect = viewModel::setVibrateOnConnect,
@@ -276,6 +324,29 @@ private fun TelviqueMainRoot(
                 )
             }
         }
+    }
+
+    if (showRestrictedSettingsHelp) {
+        AlertDialog(
+            onDismissRequest = { showRestrictedSettingsHelp = false },
+            title = { Text("Allow Default Phone Access") },
+            text = {
+                Text(
+                    "If Android showed \"App was denied access\" (Restricted settings), " +
+                        "Android 13–16 restricts the default phone role for apps installed outside Google Play.\n\n" +
+                        "To allow it:\n" +
+                        "1. Open Settings > Apps > See all apps > Telvique\n" +
+                        "2. Tap the \u22ee menu in the top-right corner\n" +
+                        "3. Tap \"Allow restricted settings\" and verify\n" +
+                        "4. Return here and tap Set Default again"
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { showRestrictedSettingsHelp = false }) {
+                    Text("Got it")
+                }
+            }
+        )
     }
 
     val simPromptNumber = uiState.pendingSimChoiceNumber

@@ -35,6 +35,8 @@ data class MainUiState(
     val simAccounts: List<SimAccountInfo> = emptyList(),
     val settings: TelviqueSettings = TelviqueSettings(),
     val isDefaultDialer: Boolean = false,
+    val isCallScreeningAvailable: Boolean = false,
+    val isCallScreeningHeld: Boolean = false,
     val missingPermissions: List<String> = emptyList(),
     val pendingSimChoiceNumber: String? = null
 ) {
@@ -74,8 +76,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val recentsFilter = MutableStateFlow(RecentsFilter.ALL)
     private val recentsQuery = MutableStateFlow("")
     private val contactsQuery = MutableStateFlow("")
+    private data class RoleStatus(
+        val isDefaultDialer: Boolean = false,
+        val isCallScreeningAvailable: Boolean = false,
+        val isCallScreeningHeld: Boolean = false
+    )
+
     private val simAccountsFlow = MutableStateFlow<List<SimAccountInfo>>(emptyList())
-    private val isDefaultDialerFlow = MutableStateFlow(false)
+    private val roleStatusFlow = MutableStateFlow(RoleStatus())
     private val missingPermissionsFlow = MutableStateFlow<List<String>>(emptyList())
     private val pendingSimChoiceNumber = MutableStateFlow<String?>(null)
 
@@ -101,7 +109,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val contactsQuery: String,
         val simAccounts: List<SimAccountInfo>,
         val settings: TelviqueSettings,
-        val isDefaultDialer: Boolean,
+        val roleStatus: RoleStatus,
         val missingPermissions: List<String>
     )
 
@@ -109,10 +117,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         contactsQuery,
         simAccountsFlow,
         settingsRepo.settingsFlow,
-        isDefaultDialerFlow,
+        roleStatusFlow,
         missingPermissionsFlow
-    ) { cQuery, sims, settings, isDefault, missing ->
-        AuxiliaryState(cQuery, sims, settings, isDefault, missing)
+    ) { cQuery, sims, settings, roleStatus, missing ->
+        AuxiliaryState(cQuery, sims, settings, roleStatus, missing)
     }
 
     val uiState: StateFlow<MainUiState> = combine(
@@ -135,7 +143,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             contactsQuery = aux.contactsQuery,
             simAccounts = aux.simAccounts,
             settings = aux.settings,
-            isDefaultDialer = aux.isDefaultDialer,
+            isDefaultDialer = aux.roleStatus.isDefaultDialer,
+            isCallScreeningAvailable = aux.roleStatus.isCallScreeningAvailable,
+            isCallScreeningHeld = aux.roleStatus.isCallScreeningHeld,
             missingPermissions = aux.missingPermissions,
             pendingSimChoiceNumber = simChoiceNumber
         )
@@ -152,12 +162,31 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun refreshSystemStatus() {
         val ctx = getApplication<Application>()
+        val roleManager = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            ctx.getSystemService(RoleManager::class.java)
+        } else {
+            null
+        }
         val isDefault = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            ctx.getSystemService(RoleManager::class.java)?.isRoleHeld(RoleManager.ROLE_DIALER) == true
+            roleManager?.isRoleHeld(RoleManager.ROLE_DIALER) == true
         } else {
             ctx.getSystemService(TelecomManager::class.java)?.defaultDialerPackage == ctx.packageName
         }
-        isDefaultDialerFlow.value = isDefault
+        val screeningAvailable = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            roleManager?.isRoleAvailable(RoleManager.ROLE_CALL_SCREENING) == true
+        } else {
+            false
+        }
+        val screeningHeld = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            roleManager?.isRoleHeld(RoleManager.ROLE_CALL_SCREENING) == true
+        } else {
+            false
+        }
+        roleStatusFlow.value = RoleStatus(
+            isDefaultDialer = isDefault,
+            isCallScreeningAvailable = screeningAvailable,
+            isCallScreeningHeld = screeningHeld
+        )
 
         val required = mutableListOf(
             Manifest.permission.CALL_PHONE,
@@ -230,6 +259,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun callNumber(number: String, forceSimChooser: Boolean = false) {
         val cleaned = number.trim()
         if (cleaned.isEmpty()) return
+
+        // Never delay or intercept emergency calls with SIM chooser or preferred SIM overrides.
+        if (repo.isEmergencyNumber(cleaned)) {
+            repo.placeCall(cleaned, null)
+            return
+        }
 
         val sims = simAccountsFlow.value
         val preferredId = uiState.value.settings.preferredSimId
