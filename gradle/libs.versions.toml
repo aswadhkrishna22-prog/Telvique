@@ -11,6 +11,8 @@ googleMaterial = "1.12.0"
 coil = "3.5.0"
 datastore = "1.2.1"
 coroutines = "1.11.0"
+biometric = "1.1.0"
+fragment = "1.8.6"
 haze = "2.0.1"
 kyantBackdrop = "2.0.1"
 fletchmckeeLiquid = "1.1.1"
@@ -34,6 +36,8 @@ google-material = { module = "com.google.android.material:material", version.ref
 coil-compose = { module = "io.coil-kt.coil3:coil-compose", version.ref = "coil" }
 androidx-datastore-preferences = { module = "androidx.datastore:datastore-preferences", version.ref = "datastore" }
 kotlinx-coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "coroutines" }
+androidx-biometric = { module = "androidx.biometric:biometric", version.ref = "biometric" }
+androidx-fragment-ktx = { module = "androidx.fragment:fragment-ktx", version.ref = "fragment" }
 haze = { module = "dev.chrisbanes.haze:haze", version.ref = "haze" }
 haze-blur = { module = "dev.chrisbanes.haze:haze-blur", version.ref = "haze" }
 kyant-backdrop = { module = "io.github.kyant0:backdrop", version.ref = "kyantBackdrop" }

@@ -71,4 +71,12 @@ class PhoneModelsTest {
         assertEquals("*#06#", PhoneFormatUtils.normalizeDialInput("USSD: *#06#"))
         assertEquals("+919876543210", PhoneFormatUtils.normalizeDialInput("+91 98765-43210"))
     }
+
+    @Test
+    fun maskPhoneNumber_preservesCountryCodeAndLastThreeDigits() {
+        assertEquals("+91 \u2022\u2022\u2022\u2022\u2022 \u2022\u2022342", PhoneFormatUtils.maskPhoneNumber("+91 98765 00342"))
+        assertEquals("+91\u2022\u2022\u2022\u2022\u2022\u2022\u2022342", PhoneFormatUtils.maskPhoneNumber("+919876500342"))
+        assertEquals("\u2022\u2022\u2022\u2022\u2022\u2022\u2022210", PhoneFormatUtils.maskPhoneNumber("9876543210"))
+        assertEquals("Private Number", PhoneFormatUtils.maskPhoneNumber("Private Number"))
+    }
 }

@@ -6,13 +6,16 @@ import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import android.telecom.TelecomManager
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.fragment.app.FragmentActivity
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.tween
@@ -28,6 +31,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -36,7 +40,11 @@ import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -58,6 +66,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.telvique.phone.data.PhoneLayoutMode
+import com.telvique.phone.security.BiometricAuthHelper
+import com.telvique.phone.security.applyRecentsPrivacy
 import com.telvique.phone.telecom.CallManager
 import com.telvique.phone.telecom.CallNotificationHelper
 import com.telvique.phone.telecom.CallPhase
@@ -83,13 +93,16 @@ import io.github.fletchmckee.liquid.rememberLiquidState
 private enum class UnifiedTab { CALLS, CONTACTS, KEYPAD }
 private enum class ClassicTab { FAVORITES, RECENTS, CONTACTS, KEYPAD, SETTINGS }
 
-class MainActivity : ComponentActivity() {
+class MainActivity : FragmentActivity() {
 
     private val viewModel: MainViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            applyRecentsPrivacy(true)
+        }
         handleDialIntent(intent)
 
         setContent {
@@ -104,9 +117,21 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onStart() {
+        super.onStart()
+        viewModel.onAppForegrounded()
+    }
+
     override fun onResume() {
         super.onResume()
         viewModel.refreshSystemStatus()
+    }
+
+    override fun onStop() {
+        super.onStop()
+        if (!isChangingConfigurations) {
+            viewModel.onAppBackgrounded()
+        }
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -142,12 +167,74 @@ private fun TelviqueMainRoot(
     val missedCallCount by CallManager.missedCallCount.collectAsStateWithLifecycle()
     val keypadTrigger by viewModel.navigateToKeypadTrigger.collectAsStateWithLifecycle()
     val recentsTrigger by viewModel.navigateToRecentsTrigger.collectAsStateWithLifecycle()
+    val isLockStateReady by viewModel.isLockStateReady.collectAsStateWithLifecycle()
+    val isAppLocked by viewModel.isAppLocked.collectAsStateWithLifecycle()
+    val canAuthenticateDevice by viewModel.canAuthenticateDevice.collectAsStateWithLifecycle()
+    val maskRevealResetTrigger by viewModel.maskRevealResetTrigger.collectAsStateWithLifecycle()
+    val lifecycleOwner = LocalLifecycleOwner.current
 
     var unifiedTab by rememberSaveable { mutableStateOf(UnifiedTab.KEYPAD) }
     var classicTab by rememberSaveable { mutableStateOf(ClassicTab.KEYPAD) }
     var showUnifiedSettings by rememberSaveable { mutableStateOf(false) }
     var showUnifiedSearch by rememberSaveable { mutableStateOf(false) }
     var showRestrictedSettingsHelp by remember { mutableStateOf(false) }
+    var promptTriggeredForCurrentResume by remember { mutableStateOf(false) }
+
+    LaunchedEffect(uiState.settings.hideInRecents) {
+        (context as? FragmentActivity)?.applyRecentsPrivacy(uiState.settings.hideInRecents)
+    }
+
+    val triggerBiometricUnlock = {
+        val activity = context as? FragmentActivity
+        if (activity != null) {
+            BiometricAuthHelper.authenticate(
+                activity = activity,
+                title = "Unlock Telvique",
+                subtitle = "Verify your identity to access calls and contacts",
+                onSuccess = {
+                    promptTriggeredForCurrentResume = false
+                    viewModel.onBiometricUnlockSucceeded()
+                }
+            )
+        }
+    }
+
+    val requestEnableAppLock = {
+        val activity = context as? FragmentActivity
+        if (activity != null) {
+            BiometricAuthHelper.authenticate(
+                activity = activity,
+                title = "Enable App Lock",
+                subtitle = "Authenticate to turn on Telvique App Lock",
+                onSuccess = { viewModel.setAppLockEnabled(true) }
+            )
+        }
+    }
+
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        if (isLockStateReady && isAppLocked && canAuthenticateDevice && !promptTriggeredForCurrentResume) {
+            promptTriggeredForCurrentResume = true
+            triggerBiometricUnlock()
+        }
+    }
+
+    LifecycleEventEffect(Lifecycle.Event.ON_PAUSE) {
+        promptTriggeredForCurrentResume = false
+    }
+
+    LaunchedEffect(isLockStateReady, isAppLocked, canAuthenticateDevice) {
+        if (!isAppLocked) {
+            promptTriggeredForCurrentResume = false
+        } else if (
+            isLockStateReady &&
+            canAuthenticateDevice &&
+            !promptTriggeredForCurrentResume &&
+            lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
+        ) {
+            promptTriggeredForCurrentResume = true
+            triggerBiometricUnlock()
+        }
+    }
 
     LaunchedEffect(keypadTrigger) {
         if (keypadTrigger > 0) {
@@ -280,6 +367,51 @@ private fun TelviqueMainRoot(
             .fillMaxSize()
             .background(appBackground)
     ) {
+        if (!isLockStateReady) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(appBackground)
+            )
+        } else if (isAppLocked) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(appBackground)
+            ) {
+                if (ongoingCall != null) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(palette.callGreen)
+                            .windowInsetsPadding(WindowInsets.statusBars)
+                            .clickable(onClick = onReturnToCall)
+                            .padding(horizontal = 16.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = ApplePhoneIcons.PhoneFill,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Return to Call • ${ongoingCall.displayName}",
+                            color = Color.White,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+                TelviqueLockOverlay(
+                    onUnlockClick = triggerBiometricUnlock,
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                )
+            }
+        } else {
         // Content Plane (captured by Fletchmckee Liquid for the sibling bottom tab bar)
         Box(
             modifier = Modifier
@@ -335,6 +467,8 @@ private fun TelviqueMainRoot(
                                     layoutMode = PhoneLayoutMode.UNIFIED,
                                     selectedFilter = uiState.recentsFilter,
                                     blockedNumbers = uiState.settings.blockedNumbers,
+                                    maskNumbers = uiState.settings.maskNumbers,
+                                    maskRevealResetTrigger = maskRevealResetTrigger,
                                     bottomInsetPadding = bottomBarReservedHeight,
                                     onFilterChange = viewModel::setRecentsFilter,
                                     onLayoutModeChange = viewModel::setLayoutMode,
@@ -409,6 +543,8 @@ private fun TelviqueMainRoot(
                                     layoutMode = PhoneLayoutMode.CLASSIC,
                                     selectedFilter = uiState.recentsFilter,
                                     blockedNumbers = uiState.settings.blockedNumbers,
+                                    maskNumbers = uiState.settings.maskNumbers,
+                                    maskRevealResetTrigger = maskRevealResetTrigger,
                                     bottomInsetPadding = bottomBarReservedHeight,
                                     onFilterChange = viewModel::setRecentsFilter,
                                     onLayoutModeChange = viewModel::setLayoutMode,
@@ -475,7 +611,13 @@ private fun TelviqueMainRoot(
                                     onUnblockNumber = viewModel::unblockNumber,
                                     onUpdateQuickResponse = viewModel::updateQuickResponse,
                                     onSetSpeedDial = viewModel::setSpeedDial,
-                                    onSetVoicemailNumber = viewModel::setVoicemailNumber
+                                    onSetVoicemailNumber = viewModel::setVoicemailNumber,
+                                    canAuthenticateDevice = canAuthenticateDevice,
+                                    onRequestEnableAppLock = requestEnableAppLock,
+                                    onToggleAppLock = viewModel::setAppLockEnabled,
+                                    onLockGraceChange = viewModel::setLockGraceSeconds,
+                                    onToggleHideInRecents = viewModel::setHideInRecents,
+                                    onToggleMaskNumbers = viewModel::setMaskNumbers
                                 )
                             }
                             }
@@ -584,7 +726,13 @@ private fun TelviqueMainRoot(
                     onUnblockNumber = viewModel::unblockNumber,
                     onUpdateQuickResponse = viewModel::updateQuickResponse,
                     onSetSpeedDial = viewModel::setSpeedDial,
-                    onSetVoicemailNumber = viewModel::setVoicemailNumber
+                    onSetVoicemailNumber = viewModel::setVoicemailNumber,
+                    canAuthenticateDevice = canAuthenticateDevice,
+                    onRequestEnableAppLock = requestEnableAppLock,
+                    onToggleAppLock = viewModel::setAppLockEnabled,
+                    onLockGraceChange = viewModel::setLockGraceSeconds,
+                    onToggleHideInRecents = viewModel::setHideInRecents,
+                    onToggleMaskNumbers = viewModel::setMaskNumbers
                 )
             }
 
@@ -597,13 +745,16 @@ private fun TelviqueMainRoot(
                 UnifiedSearchOverlay(
                     contacts = uiState.contacts,
                     callLogs = uiState.callLogs,
+                    maskNumbers = uiState.settings.maskNumbers,
+                    maskRevealResetTrigger = maskRevealResetTrigger,
                     onCallNumber = { viewModel.callNumber(it) },
                     onDismiss = { showUnifiedSearch = false }
                 )
             }
         }
+    }
 
-    if (showRestrictedSettingsHelp) {
+    if (isLockStateReady && !isAppLocked && showRestrictedSettingsHelp) {
         AlertDialog(
             onDismissRequest = { showRestrictedSettingsHelp = false },
             containerColor = palette.cardSurface,
@@ -630,12 +781,71 @@ private fun TelviqueMainRoot(
     }
 
     val simPromptNumber = uiState.pendingSimChoiceNumber
-    if (simPromptNumber != null && uiState.simAccounts.size > 1) {
+    if (isLockStateReady && !isAppLocked && simPromptNumber != null && uiState.simAccounts.size > 1) {
         SimPickerDialog(
             number = simPromptNumber,
             sims = uiState.simAccounts,
             onSelectSim = { sim -> viewModel.callWithSim(simPromptNumber, sim.handle) },
             onDismiss = viewModel::dismissSimChooser
         )
+    }
+}
+
+@Composable
+private fun TelviqueLockOverlay(
+    onUnlockClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val palette = LocalApplePalette.current
+    Column(
+        modifier = modifier
+            .background(palette.background)
+            .padding(horizontal = 32.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Box(
+            modifier = Modifier
+                .size(72.dp)
+                .clip(CircleShape)
+                .background(palette.cardSurface),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.Lock,
+                contentDescription = "Locked",
+                tint = palette.accentBlue,
+                modifier = Modifier.size(34.dp)
+            )
+        }
+        Spacer(modifier = Modifier.height(18.dp))
+        Text(
+            text = "Telvique",
+            color = palette.label,
+            fontSize = 28.sp,
+            fontWeight = FontWeight.Bold
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(
+            text = "App is locked",
+            color = palette.secondaryLabel,
+            fontSize = 15.sp
+        )
+        Spacer(modifier = Modifier.height(26.dp))
+        Button(
+            onClick = onUnlockClick,
+            shape = CircleShape,
+            colors = ButtonDefaults.buttonColors(
+                containerColor = palette.accentBlue,
+                contentColor = Color.White
+            )
+        ) {
+            Text(
+                text = "Unlock",
+                fontSize = 16.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(horizontal = 18.dp, vertical = 4.dp)
+            )
+        }
     }
 }

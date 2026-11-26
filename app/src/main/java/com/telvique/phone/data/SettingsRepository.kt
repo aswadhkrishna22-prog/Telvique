@@ -3,6 +3,7 @@ package com.telvique.phone.data
 import android.content.Context
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -21,7 +22,11 @@ data class TelviqueSettings(
     val preferredSimId: String? = null,
     val layoutMode: PhoneLayoutMode = PhoneLayoutMode.UNIFIED,
     val speedDial: Map<String, String> = emptyMap(),
-    val voicemailNumber: String = "*86"
+    val voicemailNumber: String = "*86",
+    val hideInRecents: Boolean = true,
+    val appLockEnabled: Boolean = false,
+    val lockGraceSeconds: Int = 30,
+    val maskNumbers: Boolean = false
 ) {
     companion object {
         val DEFAULT_QUICK_RESPONSES = listOf(
@@ -44,6 +49,10 @@ class SettingsRepository(private val context: Context) {
         val PREFERRED_SIM_ID = stringPreferencesKey("preferred_sim_id")
         val LAYOUT_MODE = stringPreferencesKey("phone_layout_mode")
         val VOICEMAIL_NUMBER = stringPreferencesKey("voicemail_number")
+        val HIDE_IN_RECENTS = booleanPreferencesKey("hide_in_recents")
+        val APP_LOCK_ENABLED = booleanPreferencesKey("app_lock_enabled")
+        val LOCK_GRACE_SECONDS = intPreferencesKey("lock_grace_seconds")
+        val MASK_NUMBERS = booleanPreferencesKey("mask_numbers")
         fun speedDialKey(digit: String) = stringPreferencesKey("speed_dial_$digit")
     }
 
@@ -73,7 +82,11 @@ class SettingsRepository(private val context: Context) {
             preferredSimId = prefs[Keys.PREFERRED_SIM_ID]?.takeIf { it.isNotBlank() },
             layoutMode = mode,
             speedDial = speedDialMap,
-            voicemailNumber = prefs[Keys.VOICEMAIL_NUMBER]?.takeIf { it.isNotBlank() } ?: "*86"
+            voicemailNumber = prefs[Keys.VOICEMAIL_NUMBER]?.takeIf { it.isNotBlank() } ?: "*86",
+            hideInRecents = prefs[Keys.HIDE_IN_RECENTS] ?: true,
+            appLockEnabled = prefs[Keys.APP_LOCK_ENABLED] ?: false,
+            lockGraceSeconds = prefs[Keys.LOCK_GRACE_SECONDS] ?: 30,
+            maskNumbers = prefs[Keys.MASK_NUMBERS] ?: false
         )
     }
 
@@ -116,6 +129,22 @@ class SettingsRepository(private val context: Context) {
         val cleaned = number.trim()
         if (cleaned.isEmpty()) return
         context.telviqueDataStore.edit { it[Keys.VOICEMAIL_NUMBER] = cleaned }
+    }
+
+    suspend fun setHideInRecents(enabled: Boolean) {
+        context.telviqueDataStore.edit { it[Keys.HIDE_IN_RECENTS] = enabled }
+    }
+
+    suspend fun setAppLockEnabled(enabled: Boolean) {
+        context.telviqueDataStore.edit { it[Keys.APP_LOCK_ENABLED] = enabled }
+    }
+
+    suspend fun setLockGraceSeconds(seconds: Int) {
+        context.telviqueDataStore.edit { it[Keys.LOCK_GRACE_SECONDS] = seconds.coerceAtLeast(0) }
+    }
+
+    suspend fun setMaskNumbers(enabled: Boolean) {
+        context.telviqueDataStore.edit { it[Keys.MASK_NUMBERS] = enabled }
     }
 
     suspend fun blockNumber(number: String) {

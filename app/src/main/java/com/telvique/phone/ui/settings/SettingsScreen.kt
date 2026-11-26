@@ -29,8 +29,10 @@ import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Block
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.DeleteOutline
+import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.PhoneAndroid
 import androidx.compose.material.icons.rounded.SimCard
+import androidx.compose.material.icons.rounded.WarningAmber
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -89,7 +91,13 @@ fun SettingsScreen(
     onUnblockNumber: (String) -> Unit,
     onUpdateQuickResponse: (Int, String) -> Unit,
     onSetSpeedDial: (String, String?) -> Unit = { _, _ -> },
-    onSetVoicemailNumber: (String) -> Unit = {}
+    onSetVoicemailNumber: (String) -> Unit = {},
+    canAuthenticateDevice: Boolean = true,
+    onRequestEnableAppLock: () -> Unit = {},
+    onToggleAppLock: (Boolean) -> Unit = {},
+    onLockGraceChange: (Int) -> Unit = {},
+    onToggleHideInRecents: (Boolean) -> Unit = {},
+    onToggleMaskNumbers: (Boolean) -> Unit = {}
 ) {
     val context = LocalContext.current
     val palette = LocalApplePalette.current
@@ -98,6 +106,8 @@ fun SettingsScreen(
     var showAddBlockDialog by remember { mutableStateOf(false) }
     var editingResponsePair by remember { mutableStateOf<Pair<Int, String>?>(null) }
     var editingSpeedDialDigit by remember { mutableStateOf<String?>(null) }
+    var showLockGraceDialog by remember { mutableStateOf(false) }
+    var showNoDeviceLockDialog by remember { mutableStateOf(false) }
     val canFullScreen = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
         context.getSystemService(NotificationManager::class.java)?.canUseFullScreenIntent() == true
     } else {
@@ -342,6 +352,102 @@ fun SettingsScreen(
                             modifier = Modifier.size(16.dp)
                         )
                     }
+                }
+            }
+
+            // Privacy
+            item(key = "privacy_section") {
+                AppleSectionHeader("Privacy")
+                AppleGroupedCard {
+                    AppleSwitchRow(
+                        title = "App Lock",
+                        subtitle = "Require biometrics or device PIN to open Telvique",
+                        checked = settings.appLockEnabled,
+                        onCheckedChange = { enable ->
+                            if (!enable) {
+                                onToggleAppLock(false)
+                            } else if (!canAuthenticateDevice) {
+                                showNoDeviceLockDialog = true
+                            } else {
+                                onRequestEnableAppLock()
+                            }
+                        }
+                    )
+                    if (settings.appLockEnabled && !canAuthenticateDevice) {
+                        AppleInsetDivider()
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.WarningAmber,
+                                contentDescription = null,
+                                tint = palette.callRed,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text(
+                                text = "Screen lock removed on this device. App Lock will not lock until you set a PIN or biometric, or turn App Lock off.",
+                                color = palette.callRed,
+                                fontSize = 12.sp
+                            )
+                        }
+                    }
+                    AppleInsetDivider()
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { showLockGraceDialog = true }
+                            .padding(horizontal = 16.dp, vertical = 13.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Lock Delay",
+                                color = palette.label,
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Text(
+                                text = "Grace period after leaving Telvique",
+                                color = palette.secondaryLabel,
+                                fontSize = 13.sp
+                            )
+                        }
+                        Text(
+                            text = lockGraceLabel(settings.lockGraceSeconds),
+                            color = palette.accentBlue,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Icon(
+                            imageVector = ApplePhoneIcons.ChevronRight,
+                            contentDescription = null,
+                            tint = palette.tertiaryLabel,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                    AppleInsetDivider()
+                    AppleSwitchRow(
+                        title = "Hide in App Switcher",
+                        subtitle = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                            "Hide recent-apps preview thumbnail"
+                        } else {
+                            "Hide preview thumbnail (also blocks screenshots)"
+                        },
+                        checked = settings.hideInRecents,
+                        onCheckedChange = onToggleHideInRecents
+                    )
+                    AppleInsetDivider()
+                    AppleSwitchRow(
+                        title = "Hide Phone Numbers",
+                        subtitle = "Mask numbers in Recents and Search; tap a number to reveal",
+                        checked = settings.maskNumbers,
+                        onCheckedChange = onToggleMaskNumbers
+                    )
                 }
             }
 
@@ -690,6 +796,90 @@ fun SettingsScreen(
             }
         )
     }
+
+    if (showLockGraceDialog) {
+        val options = listOf(0, 30, 60, 300)
+        AlertDialog(
+            onDismissRequest = { showLockGraceDialog = false },
+            containerColor = palette.cardSurface,
+            titleContentColor = palette.label,
+            title = { Text("Lock Delay", fontWeight = FontWeight.SemiBold) },
+            text = {
+                Column {
+                    options.forEachIndexed { idx, seconds ->
+                        val selected = settings.lockGraceSeconds == seconds
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    onLockGraceChange(seconds)
+                                    showLockGraceDialog = false
+                                }
+                                .padding(vertical = 12.dp, horizontal = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = lockGraceLabel(seconds),
+                                color = palette.label,
+                                fontSize = 16.sp,
+                                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                                modifier = Modifier.weight(1f)
+                            )
+                            if (selected) {
+                                Icon(
+                                    imageVector = ApplePhoneIcons.Checkmark,
+                                    contentDescription = "Selected",
+                                    tint = palette.accentBlue,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                        if (idx < options.lastIndex) AppleInsetDivider()
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showLockGraceDialog = false }) {
+                    Text("Close", color = palette.accentBlue, fontWeight = FontWeight.SemiBold)
+                }
+            }
+        )
+    }
+
+    if (showNoDeviceLockDialog) {
+        AlertDialog(
+            onDismissRequest = { showNoDeviceLockDialog = false },
+            containerColor = palette.cardSurface,
+            titleContentColor = palette.label,
+            textContentColor = palette.secondaryLabel,
+            icon = {
+                Icon(
+                    imageVector = Icons.Rounded.Lock,
+                    contentDescription = null,
+                    tint = palette.accentBlue
+                )
+            },
+            title = { Text("Device Screen Lock Required", fontWeight = FontWeight.SemiBold) },
+            text = {
+                Text(
+                    "Set up a PIN, pattern, password, or biometric unlock in Android Settings before enabling App Lock."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { showNoDeviceLockDialog = false }) {
+                    Text("OK", color = palette.accentBlue, fontWeight = FontWeight.SemiBold)
+                }
+            }
+        )
+    }
+}
+
+private fun lockGraceLabel(seconds: Int): String = when (seconds) {
+    0 -> "Immediately"
+    30 -> "30 seconds"
+    60 -> "1 minute"
+    300 -> "5 minutes"
+    else -> "${seconds}s"
 }
 
 @Composable

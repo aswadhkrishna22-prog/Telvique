@@ -4,6 +4,7 @@ import android.Manifest
 import android.app.Application
 import android.app.role.RoleManager
 import android.os.Build
+import android.os.SystemClock
 import android.telecom.PhoneAccountHandle
 import android.telecom.TelecomManager
 import androidx.lifecycle.AndroidViewModel
@@ -18,11 +19,13 @@ import com.telvique.phone.data.RecentsFilter
 import com.telvique.phone.data.SimAccountInfo
 import com.telvique.phone.data.T9Matcher
 import com.telvique.phone.data.TelviqueSettings
+import com.telvique.phone.security.BiometricAuthHelper
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -93,6 +96,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val navigateToKeypadTrigger: StateFlow<Int> = _navigateToKeypadTrigger.asStateFlow()
     private val _navigateToRecentsTrigger = MutableStateFlow(0)
     val navigateToRecentsTrigger: StateFlow<Int> = _navigateToRecentsTrigger.asStateFlow()
+
+    private var latestSettings = TelviqueSettings()
+    private var backgroundedElapsedMs: Long? = null
+    private val _isAppLocked = MutableStateFlow(false)
+    val isAppLocked: StateFlow<Boolean> = _isAppLocked.asStateFlow()
+    private val _isLockStateReady = MutableStateFlow(false)
+    val isLockStateReady: StateFlow<Boolean> = _isLockStateReady.asStateFlow()
+    private val _canAuthenticateDevice = MutableStateFlow(true)
+    val canAuthenticateDevice: StateFlow<Boolean> = _canAuthenticateDevice.asStateFlow()
+    private val _maskRevealResetTrigger = MutableStateFlow(0)
+    val maskRevealResetTrigger: StateFlow<Int> = _maskRevealResetTrigger.asStateFlow()
 
     private data class CoreListsState(
         val dialerInput: String,
@@ -165,8 +179,52 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     )
 
     init {
+        viewModelScope.launch {
+            val initial = settingsRepo.settingsFlow.first()
+            latestSettings = initial
+            val canAuth = BiometricAuthHelper.canAuthenticate(getApplication())
+            _canAuthenticateDevice.value = canAuth
+            _isAppLocked.value = initial.appLockEnabled && canAuth
+            _isLockStateReady.value = true
+            settingsRepo.settingsFlow.collect { updated ->
+                latestSettings = updated
+                if (!updated.appLockEnabled) {
+                    _isAppLocked.value = false
+                }
+            }
+        }
         refreshSystemStatus()
         observeSystemData()
+    }
+
+    fun onAppBackgrounded() {
+        backgroundedElapsedMs = SystemClock.elapsedRealtime()
+        _maskRevealResetTrigger.value += 1
+    }
+
+    fun onAppForegrounded() {
+        val canAuth = BiometricAuthHelper.canAuthenticate(getApplication())
+        _canAuthenticateDevice.value = canAuth
+        val backgroundAt = backgroundedElapsedMs
+        backgroundedElapsedMs = null
+        if (!canAuth) {
+            _isAppLocked.value = false
+            return
+        }
+        if (latestSettings.appLockEnabled && backgroundAt != null) {
+            val elapsedMs = (SystemClock.elapsedRealtime() - backgroundAt).coerceAtLeast(0L)
+            val graceMs = latestSettings.lockGraceSeconds * 1000L
+            val shouldLock = if (latestSettings.lockGraceSeconds <= 0) true else elapsedMs > graceMs
+            if (shouldLock) {
+                _isAppLocked.value = true
+                _maskRevealResetTrigger.value += 1
+            }
+        }
+    }
+
+    fun onBiometricUnlockSucceeded() {
+        backgroundedElapsedMs = null
+        _isAppLocked.value = false
     }
 
     fun refreshSystemStatus() {
@@ -214,6 +272,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         missingPermissionsFlow.value = required.filterNot { repo.hasPermission(it) }
         simAccountsFlow.value = repo.getSimAccounts()
+        val canAuth = BiometricAuthHelper.canAuthenticate(ctx)
+        _canAuthenticateDevice.value = canAuth
+        if (!canAuth) {
+            _isAppLocked.value = false
+        }
 
         viewModelScope.launch {
             contactsFlow.value = repo.loadContacts()
@@ -388,5 +451,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun updateQuickResponse(index: Int, text: String) {
         viewModelScope.launch { settingsRepo.updateQuickResponse(index, text) }
+    }
+
+    fun setHideInRecents(enabled: Boolean) {
+        viewModelScope.launch { settingsRepo.setHideInRecents(enabled) }
+    }
+
+    fun setAppLockEnabled(enabled: Boolean) {
+        if (!enabled) {
+            _isAppLocked.value = false
+        }
+        viewModelScope.launch { settingsRepo.setAppLockEnabled(enabled) }
+    }
+
+    fun setLockGraceSeconds(seconds: Int) {
+        viewModelScope.launch { settingsRepo.setLockGraceSeconds(seconds) }
+    }
+
+    fun setMaskNumbers(enabled: Boolean) {
+        viewModelScope.launch { settingsRepo.setMaskNumbers(enabled) }
     }
 }

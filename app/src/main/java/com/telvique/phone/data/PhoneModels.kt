@@ -140,6 +140,56 @@ object PhoneFormatUtils {
         }.getOrNull()?.takeIf { it.isNotBlank() } ?: trimmed
     }
 
+    fun maskPhoneNumber(number: String): String {
+        val formatted = formatDisplayNumber(number)
+        val trimmed = formatted.trim()
+        if (trimmed.isEmpty()) return trimmed
+        val totalDigits = trimmed.count { it.isDigit() }
+        if (totalDigits == 0) return trimmed
+
+        // Identify leading country-code digit positions to keep unmasked when prefixed with '+'
+        var prefixEndIdx = 0
+        if (trimmed.startsWith("+")) {
+            val firstSeparatorIdx = trimmed.indexOfFirst { it == ' ' || it == '-' }
+            prefixEndIdx = if (firstSeparatorIdx in 2..5 && trimmed.substring(1, firstSeparatorIdx).all { it.isDigit() }) {
+                firstSeparatorIdx
+            } else {
+                val digitsAfterPlus = totalDigits
+                val ccDigits = when {
+                    digitsAfterPlus <= 7 -> 0
+                    trimmed.startsWith("+1") && digitsAfterPlus == 11 -> 1
+                    else -> (digitsAfterPlus - 10).coerceIn(1, 3)
+                }
+                if (ccDigits > 0) 1 + ccDigits else 0
+            }
+        }
+
+        val remainingDigitsCount = trimmed.substring(prefixEndIdx).count { it.isDigit() }
+        val keepTailDigits = when {
+            remainingDigitsCount > 4 -> 3
+            remainingDigitsCount in 2..4 -> 1
+            else -> 0
+        }
+
+        var tailSeen = 0
+        val maskIndices = BooleanArray(trimmed.length)
+        for (i in trimmed.lastIndex downTo prefixEndIdx) {
+            if (trimmed[i].isDigit()) {
+                if (tailSeen < keepTailDigits) {
+                    tailSeen++
+                } else {
+                    maskIndices[i] = true
+                }
+            }
+        }
+
+        return buildString(trimmed.length) {
+            for (i in trimmed.indices) {
+                append(if (maskIndices[i]) '\u2022' else trimmed[i])
+            }
+        }
+    }
+
     fun comparableTail(input: String): String {
         val digits = input.filter { it.isDigit() }
         return if (digits.length > 10) digits.takeLast(10) else digits

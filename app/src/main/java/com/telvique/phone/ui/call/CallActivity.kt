@@ -98,6 +98,7 @@ import com.telvique.phone.MainActivity
 import com.telvique.phone.TelviqueApp
 import com.telvique.phone.data.PhoneFormatUtils
 import com.telvique.phone.data.TelviqueSettings
+import com.telvique.phone.security.applyRecentsPrivacy
 import com.telvique.phone.telecom.CallAudioUiState
 import com.telvique.phone.telecom.CallManager
 import com.telvique.phone.telecom.CallPhase
@@ -117,6 +118,9 @@ class CallActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            applyRecentsPrivacy(true)
+        }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
             setShowWhenLocked(true)
@@ -137,6 +141,10 @@ class CallActivity : ComponentActivity() {
             TelviqueTheme(darkTheme = true, forceDarkSystemBars = true) {
                 val telecomState by CallManager.uiState.collectAsStateWithLifecycle()
                 val settings by settingsFlow.collectAsStateWithLifecycle(initialValue = TelviqueSettings())
+
+                LaunchedEffect(settings.hideInRecents) {
+                    applyRecentsPrivacy(settings.hideInRecents)
+                }
 
                 LaunchedEffect(telecomState.calls) {
                     if (telecomState.calls.isEmpty()) {

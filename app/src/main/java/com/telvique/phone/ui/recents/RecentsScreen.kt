@@ -26,6 +26,8 @@ import androidx.compose.material.icons.rounded.Block
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.PersonAdd
+import androidx.compose.material.icons.rounded.Visibility
+import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -40,6 +42,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -52,6 +55,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -88,6 +93,8 @@ fun RecentsScreen(
     layoutMode: PhoneLayoutMode,
     selectedFilter: RecentsFilter,
     blockedNumbers: Set<String>,
+    maskNumbers: Boolean = false,
+    maskRevealResetTrigger: Int = 0,
     bottomInsetPadding: Dp,
     onFilterChange: (RecentsFilter) -> Unit,
     onLayoutModeChange: (PhoneLayoutMode) -> Unit,
@@ -104,7 +111,25 @@ fun RecentsScreen(
     var showFilterMenu by remember { mutableStateOf(false) }
     var showClearDialog by remember { mutableStateOf(false) }
     var infoTarget by remember { mutableStateOf<GroupedCallLogItem?>(null) }
+    var revealedGroupIds by remember { mutableStateOf(emptySet<Long>()) }
+    var detailRevealed by remember { mutableStateOf(false) }
     val groupedLogs = remember(callLogs) { groupConsecutiveCallLogs(callLogs) }
+
+    LaunchedEffect(maskNumbers, maskRevealResetTrigger) {
+        revealedGroupIds = emptySet()
+        detailRevealed = false
+    }
+
+    LaunchedEffect(infoTarget?.primary?.id) {
+        detailRevealed = false
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            revealedGroupIds = emptySet()
+            detailRevealed = false
+        }
+    }
 
     val headerBlurProgress by remember {
         derivedStateOf {
@@ -348,6 +373,15 @@ fun RecentsScreen(
                             item = item,
                             count = group.count,
                             showDivider = index < groupedLogs.lastIndex,
+                            maskNumbers = maskNumbers,
+                            isRevealed = item.id in revealedGroupIds,
+                            onToggleReveal = {
+                                revealedGroupIds = if (item.id in revealedGroupIds) {
+                                    revealedGroupIds - item.id
+                                } else {
+                                    revealedGroupIds + item.id
+                                }
+                            },
                             onRowClick = {
                                 if (item.number.isNotBlank()) onCallNumber(item.number)
                             },
@@ -376,6 +410,13 @@ fun RecentsScreen(
             CallManager.lookupCachedCnapName(activeItem.number)
         } else null
         val effectiveTitle = cnapName ?: activeItem.displayTitle
+        val isUnsavedSheetTitle = cnapName == null && activeItem.cachedName.isNullOrBlank() && activeItem.number.isNotBlank()
+        val sheetTitleMasked = maskNumbers && isUnsavedSheetTitle && !detailRevealed
+        val sheetTitleText = when {
+            sheetTitleMasked -> PhoneFormatUtils.maskPhoneNumber(activeItem.number)
+            isUnsavedSheetTitle -> PhoneFormatUtils.formatDisplayNumber(activeItem.number)
+            else -> effectiveTitle
+        }
         val isBlocked = blockedNumbers.any {
             it == activeItem.number || PhoneFormatUtils.numbersMatch(it, activeItem.number)
         }
@@ -390,17 +431,42 @@ fun RecentsScreen(
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 ContactAvatar(
-                    name = effectiveTitle,
+                    name = if (sheetTitleMasked) sheetTitleText else effectiveTitle,
                     photoUri = activeItem.photoUri,
                     size = 76.dp
                 )
                 Spacer(modifier = Modifier.height(10.dp))
-                Text(
-                    text = effectiveTitle,
-                    color = palette.label,
-                    fontSize = 24.sp,
-                    fontWeight = FontWeight.SemiBold
-                )
+                if (maskNumbers && isUnsavedSheetTitle) {
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable { detailRevealed = !detailRevealed }
+                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = sheetTitleText,
+                            color = palette.label,
+                            fontSize = 24.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.semantics { contentDescription = sheetTitleText }
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Icon(
+                            imageVector = if (detailRevealed) Icons.Rounded.Visibility else Icons.Rounded.VisibilityOff,
+                            contentDescription = if (detailRevealed) "Hide number" else "Reveal number",
+                            tint = palette.secondaryLabel,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                } else {
+                    Text(
+                        text = sheetTitleText,
+                        color = palette.label,
+                        fontSize = 24.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
                 if (cnapName != null) {
                     Text(
                         text = "Carrier ID (CNAP)",
@@ -410,11 +476,40 @@ fun RecentsScreen(
                     )
                 }
                 if (activeItem.number.isNotBlank() && activeItem.number != effectiveTitle) {
-                    Text(
-                        text = PhoneFormatUtils.formatDisplayNumber(activeItem.number),
-                        color = palette.secondaryLabel,
-                        fontSize = 15.sp
-                    )
+                    val subNumberText = if (maskNumbers && !detailRevealed) {
+                        PhoneFormatUtils.maskPhoneNumber(activeItem.number)
+                    } else {
+                        PhoneFormatUtils.formatDisplayNumber(activeItem.number)
+                    }
+                    if (maskNumbers) {
+                        Row(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable { detailRevealed = !detailRevealed }
+                                .padding(horizontal = 6.dp, vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = subNumberText,
+                                color = palette.secondaryLabel,
+                                fontSize = 15.sp,
+                                modifier = Modifier.semantics { contentDescription = subNumberText }
+                            )
+                            Spacer(modifier = Modifier.width(5.dp))
+                            Icon(
+                                imageVector = if (detailRevealed) Icons.Rounded.Visibility else Icons.Rounded.VisibilityOff,
+                                contentDescription = if (detailRevealed) "Hide number" else "Reveal number",
+                                tint = palette.tertiaryLabel,
+                                modifier = Modifier.size(14.dp)
+                            )
+                        }
+                    } else {
+                        Text(
+                            text = subNumberText,
+                            color = palette.secondaryLabel,
+                            fontSize = 15.sp
+                        )
+                    }
                 }
                 Spacer(modifier = Modifier.height(6.dp))
                 val subtitle = buildList {
@@ -681,6 +776,9 @@ private fun AppleRecentCallRow(
     item: CallLogItem,
     count: Int,
     showDivider: Boolean,
+    maskNumbers: Boolean,
+    isRevealed: Boolean,
+    onToggleReveal: () -> Unit,
     onRowClick: () -> Unit,
     onInfoClick: () -> Unit
 ) {
@@ -690,13 +788,16 @@ private fun AppleRecentCallRow(
         CallManager.lookupCachedCnapName(item.number)
     } else null
     val isSpam = item.cachedName.isNullOrBlank() && PhoneFormatUtils.isSuspectedTelemarketer(item.number)
-    val fallbackTitle = if (item.cachedName.isNullOrBlank() && item.number.isNotBlank()) {
-        PhoneFormatUtils.formatDisplayNumber(item.number)
+    val isUnsavedRawTitle = cnapName == null && item.cachedName.isNullOrBlank() && item.number.isNotBlank()
+    val isTitleMasked = maskNumbers && isUnsavedRawTitle && !isRevealed
+    val displayNumberText = if (isUnsavedRawTitle) {
+        if (isTitleMasked) PhoneFormatUtils.maskPhoneNumber(item.number)
+        else PhoneFormatUtils.formatDisplayNumber(item.number)
     } else {
-        item.displayTitle
+        cnapName ?: item.displayTitle
     }
-    val baseTitle = cnapName ?: fallbackTitle
-    val titleWithCount = if (count > 1) "$baseTitle ($count)" else baseTitle
+    val titleWithCount = if (count > 1) "$displayNumberText ($count)" else displayNumberText
+    val avatarSafeName = if (isTitleMasked) displayNumberText else item.displayTitle
 
     Column(
         modifier = Modifier
@@ -735,7 +836,7 @@ private fun AppleRecentCallRow(
             Spacer(modifier = Modifier.width(6.dp))
 
             ContactAvatar(
-                name = item.displayTitle,
+                name = avatarSafeName,
                 photoUri = item.photoUri,
                 size = 38.dp
             )
@@ -743,14 +844,43 @@ private fun AppleRecentCallRow(
             Spacer(modifier = Modifier.width(12.dp))
 
             Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = titleWithCount,
-                    color = if (isMissed || isSpam) palette.callRed else palette.label,
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+                if (maskNumbers && isUnsavedRawTitle) {
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .clickable(onClick = onToggleReveal)
+                            .padding(vertical = 1.dp, horizontal = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = titleWithCount,
+                            color = if (isMissed || isSpam) palette.callRed else palette.label,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier
+                                .weight(1f, fill = false)
+                                .semantics { contentDescription = titleWithCount }
+                        )
+                        Spacer(modifier = Modifier.width(5.dp))
+                        Icon(
+                            imageVector = if (isRevealed) Icons.Rounded.Visibility else Icons.Rounded.VisibilityOff,
+                            contentDescription = if (isRevealed) "Hide number" else "Reveal number",
+                            tint = palette.tertiaryLabel,
+                            modifier = Modifier.size(14.dp)
+                        )
+                    }
+                } else {
+                    Text(
+                        text = titleWithCount,
+                        color = if (isMissed || isSpam) palette.callRed else palette.label,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
                 Spacer(modifier = Modifier.height(1.dp))
                 val meta = buildList {
                     when {

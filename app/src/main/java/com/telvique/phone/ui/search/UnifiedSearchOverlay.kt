@@ -20,16 +20,25 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Visibility
+import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -50,11 +59,27 @@ import com.telvique.phone.ui.theme.LocalApplePalette
 fun UnifiedSearchOverlay(
     contacts: List<ContactItem>,
     callLogs: List<CallLogItem>,
+    maskNumbers: Boolean = false,
+    maskRevealResetTrigger: Int = 0,
     onCallNumber: (String) -> Unit,
     onDismiss: () -> Unit,
 ) {
     val palette = LocalApplePalette.current
     var query by remember { mutableStateOf("") }
+    var revealedContactIds by remember { mutableStateOf(emptySet<Long>()) }
+    var revealedLogIds by remember { mutableStateOf(emptySet<Long>()) }
+
+    LaunchedEffect(maskNumbers, maskRevealResetTrigger) {
+        revealedContactIds = emptySet()
+        revealedLogIds = emptySet()
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            revealedContactIds = emptySet()
+            revealedLogIds = emptySet()
+        }
+    }
 
     val matchingContacts = remember(contacts, query) {
         val trimmed = query.trim()
@@ -142,13 +167,53 @@ fun UnifiedSearchOverlay(
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
-                                Text(
-                                    text = contact.primaryNumber,
-                                    color = palette.secondaryLabel,
-                                    fontSize = 13.sp,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
+                                val isContactRevealed = contact.id in revealedContactIds
+                                val shownContactNumber = if (maskNumbers && !isContactRevealed && contact.primaryNumber.isNotBlank()) {
+                                    PhoneFormatUtils.maskPhoneNumber(contact.primaryNumber)
+                                } else {
+                                    PhoneFormatUtils.formatDisplayNumber(contact.primaryNumber)
+                                }
+                                if (maskNumbers && contact.primaryNumber.isNotBlank()) {
+                                    Row(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(6.dp))
+                                            .clickable {
+                                                revealedContactIds = if (isContactRevealed) {
+                                                    revealedContactIds - contact.id
+                                                } else {
+                                                    revealedContactIds + contact.id
+                                                }
+                                            }
+                                            .padding(vertical = 1.dp, horizontal = 2.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = shownContactNumber,
+                                            color = palette.secondaryLabel,
+                                            fontSize = 13.sp,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier
+                                                .weight(1f, fill = false)
+                                                .semantics { contentDescription = shownContactNumber }
+                                        )
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Icon(
+                                            imageVector = if (isContactRevealed) Icons.Rounded.Visibility else Icons.Rounded.VisibilityOff,
+                                            contentDescription = if (isContactRevealed) "Hide number" else "Reveal number",
+                                            tint = palette.tertiaryLabel,
+                                            modifier = Modifier.size(13.dp)
+                                        )
+                                    }
+                                } else {
+                                    Text(
+                                        text = shownContactNumber,
+                                        color = palette.secondaryLabel,
+                                        fontSize = 13.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
                             }
                             Icon(
                                 imageVector = ApplePhoneIcons.PhoneFill,
@@ -188,23 +253,70 @@ fun UnifiedSearchOverlay(
                                 }
                             }
                     ) {
+                        val isUnsavedLog = log.cachedName.isNullOrBlank() && log.number.isNotBlank()
+                        val isLogRevealed = log.id in revealedLogIds
+                        val isLogMasked = maskNumbers && isUnsavedLog && !isLogRevealed
+                        val shownLogTitle = when {
+                            isLogMasked -> PhoneFormatUtils.maskPhoneNumber(log.number)
+                            isUnsavedLog -> PhoneFormatUtils.formatDisplayNumber(log.number)
+                            else -> log.displayTitle
+                        }
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(horizontal = 20.dp, vertical = 10.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            ContactAvatar(name = log.displayTitle, photoUri = log.photoUri, size = 36.dp)
+                            ContactAvatar(
+                                name = if (isLogMasked) shownLogTitle else log.displayTitle,
+                                photoUri = log.photoUri,
+                                size = 36.dp
+                            )
                             Spacer(modifier = Modifier.width(12.dp))
                             Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = log.displayTitle,
-                                    color = palette.label,
-                                    fontSize = 16.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
+                                if (maskNumbers && isUnsavedLog) {
+                                    Row(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(6.dp))
+                                            .clickable {
+                                                revealedLogIds = if (isLogRevealed) {
+                                                    revealedLogIds - log.id
+                                                } else {
+                                                    revealedLogIds + log.id
+                                                }
+                                            }
+                                            .padding(vertical = 1.dp, horizontal = 2.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = shownLogTitle,
+                                            color = palette.label,
+                                            fontSize = 16.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier
+                                                .weight(1f, fill = false)
+                                                .semantics { contentDescription = shownLogTitle }
+                                        )
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Icon(
+                                            imageVector = if (isLogRevealed) Icons.Rounded.Visibility else Icons.Rounded.VisibilityOff,
+                                            contentDescription = if (isLogRevealed) "Hide number" else "Reveal number",
+                                            tint = palette.tertiaryLabel,
+                                            modifier = Modifier.size(13.dp)
+                                        )
+                                    }
+                                } else {
+                                    Text(
+                                        text = shownLogTitle,
+                                        color = palette.label,
+                                        fontSize = 16.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
                                 Text(
                                     text = PhoneFormatUtils.formatAppleRecentTime(log.timestamp),
                                     color = palette.secondaryLabel,
