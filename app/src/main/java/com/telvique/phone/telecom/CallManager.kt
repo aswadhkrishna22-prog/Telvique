@@ -11,6 +11,7 @@ import android.telecom.Call
 import android.telecom.CallAudioState
 import android.telecom.CallEndpoint
 import android.telecom.CallEndpointException
+import android.telecom.Connection
 import android.telecom.VideoProfile
 import androidx.annotation.RequiresApi
 import com.telvique.phone.data.PhoneRepository
@@ -403,9 +404,9 @@ object CallManager {
                 0
             }
             val isNetworkVerified = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
-                verificationStatus == Call.Details.VERIFICATION_STATUS_PASSED
+                verificationStatus == Connection.VERIFICATION_STATUS_PASSED
             val isVerificationFailed = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
-                verificationStatus == Call.Details.VERIFICATION_STATUS_FAILED
+                verificationStatus == Connection.VERIFICATION_STATUS_FAILED
             val isIndianTelemarketer = com.telvique.phone.data.PhoneFormatUtils.isSuspectedTelemarketer(number)
             val isPotentialSpam = resolvedName == null && contactName == null &&
                 (isVerificationFailed || isIndianTelemarketer)
