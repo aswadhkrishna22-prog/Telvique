@@ -2,6 +2,7 @@ package com.telvique.phone.ui.dialer
 
 import android.graphics.RenderEffect
 import android.graphics.RuntimeShader
+import android.graphics.Shader
 import android.media.AudioManager
 import android.media.ToneGenerator
 import android.os.Build
@@ -45,14 +46,18 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Block
+import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.ContentPaste
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
+import androidx.compose.material.icons.rounded.PersonAdd
 import androidx.compose.material.icons.rounded.SimCard
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -84,6 +89,7 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -94,16 +100,21 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.telvique.phone.R
 import com.telvique.phone.data.CallLogItem
 import com.telvique.phone.data.CallLogType
 import com.telvique.phone.data.ContactItem
 import com.telvique.phone.data.DialerContactMatch
+import com.telvique.phone.data.GroupedCallLogItem
 import com.telvique.phone.data.PhoneFormatUtils
 import com.telvique.phone.data.SimAccountInfo
 import com.telvique.phone.data.T9Matcher
+import com.telvique.phone.data.groupConsecutiveCallLogs
 import com.telvique.phone.telecom.CallManager
 import com.telvique.phone.ui.components.ContactAvatar
+import com.telvique.phone.ui.components.copyNumberToClipboard
 import com.telvique.phone.ui.components.openAddContact
+import com.telvique.phone.ui.components.openSmsApp
 import com.telvique.phone.ui.contacts.AppleContactDetailSheet
 import com.telvique.phone.ui.glass.LiquidCircularGlassButton
 import com.telvique.phone.ui.glass.clearLiquidGlassPill
@@ -112,11 +123,13 @@ import com.telvique.phone.ui.glass.liquidBubbleHighlight
 import com.telvique.phone.ui.icons.ApplePhoneIcons
 import com.telvique.phone.ui.theme.LocalApplePalette
 
-// ── LIQUID GLASS AGSL SHADER TUNING CONSTANTS ────────────────────────────────
+// ── LIQUID GLASS AGSL SHADER & BACKDROP BLUR TUNING CONSTANTS ─────────────────
+const val KEYPAD_BACKDROP_BLUR_RADIUS_DP = 24f // Soft blur radius for keypad backdrop layer
+const val KEYPAD_BACKDROP_DARK_TINT = 0.30f // Dark tint over blurred backdrop (25-35% black)
 const val KEYPAD_REFRACTION_STRENGTH = 0.28f // Refraction bending & magnification strength
-const val KEYPAD_DISPERSION_STRENGTH = 0.045f // Subtle chromatic dispersion (rainbow fringe) at the rim
+const val KEYPAD_DISPERSION_STRENGTH = 0.022f // Subtle rainbow dispersion at rim only (~50% reduced)
 const val KEYPAD_SPECULAR_STRENGTH = 0.35f // Soft top-left specular highlight intensity
-const val KEYPAD_FADE_TOP_DP = 12f // Height of the fade-in gradient at the top of the glass region
+const val KEYPAD_FADE_TOP_DP = 16f // Height of the fade-in gradient at the top of the glass region
 const val KEYPAD_GLASS_TOP_OFFSET_DP = 4f // Distance above the first key row where glass starts (4px/dp)
 
 // ── AGSL RUNTIME SHADER (LIQUID GLASS REFRACTION, CHROMATIC DISPERSION & SPECULAR) ──
@@ -130,6 +143,7 @@ private const val KEYPAD_LIQUID_GLASS_SHADER_SRC = """
     uniform float uSpecular;
     uniform float uFadeTopPx;
     uniform float uDarkTheme;
+    uniform float uDarkTint;
     uniform float uPressedIndex;
     uniform float uPressedProgress;
 
@@ -163,32 +177,35 @@ private const val KEYPAD_LIQUID_GLASS_SHADER_SRC = """
 
         float keyAlpha = 1.0 - smoothstep(-1.2, 0.8, minSdf);
 
-        // 3. Background glass scrim outside/between keys
+        // 3. Background glass scrim outside/between keys (evaluates BLURRED content)
         float2 clampedP = clamp(p, float2(0.0), uSize - float2(1.0));
         half4 bgSample = content.eval(clampedP);
-        half3 bgScrim = (uDarkTheme > 0.5) ? half3(0.06, 0.06, 0.08) : half3(1.0, 1.0, 1.0);
-        half scrimAlpha = (uDarkTheme > 0.5) ? 0.52 : 0.60;
-        half3 bgMixed = mix(bgSample.rgb, bgScrim, scrimAlpha);
+        
+        // Dark tint layer over the blur (25-35% black) so list text is never sharp or legible
+        half3 tintedBg = mix(bgSample.rgb, half3(0.0, 0.0, 0.0), half(uDarkTint));
+        half3 bgScrim = (uDarkTheme > 0.5) ? half3(0.05, 0.05, 0.07) : half3(0.96, 0.96, 0.98);
+        half scrimAlpha = (uDarkTheme > 0.5) ? 0.35 : 0.45;
+        half3 bgMixed = mix(tintedBg, bgScrim, scrimAlpha);
         half4 bgColor = half4(bgMixed, bgSample.a * half(topFade));
 
         if (keyAlpha <= 0.001) {
             return bgColor;
         }
 
-        // 4. Inside key: Liquid Glass Refraction & Chromatic Dispersion
+        // 4. Inside key: Liquid Glass Refraction & Chromatic Dispersion of the BLURRED layer
         float r = closestDist;
         float R = uKeyRadius;
         float rNorm = clamp(r / R, 0.0, 1.0);
         float2 dir = (r > 0.001) ? ((p - closestCenter) / r) : float2(0.0, 0.0);
 
-        // Slight magnification in center + strong bending toward edge at rim
+        // Magnification in center + rim bending toward edge
         float mag = uRefraction * 0.14 * (1.0 - rNorm);
         float rimBend = uRefraction * 0.42 * (rNorm * rNorm * rNorm);
         float totalOffset = (mag - rimBend) * R;
         float2 pRefract = p + dir * totalOffset;
 
-        // Subtle chromatic dispersion: thin rainbow fringe at rim only
-        float disp = uDispersion * pow(rNorm, 3.5) * R;
+        // Dispersion strictly at the rim (pow 4.0) with reduced strength (~50%)
+        float disp = uDispersion * pow(rNorm, 4.0) * R;
         float2 coordR = clamp(pRefract - dir * disp, float2(0.0), uSize - float2(1.0));
         float2 coordG = clamp(pRefract, float2(0.0), uSize - float2(1.0));
         float2 coordB = clamp(pRefract + dir * disp, float2(0.0), uSize - float2(1.0));
@@ -198,6 +215,9 @@ private const val KEYPAD_LIQUID_GLASS_SHADER_SRC = """
         half bChannel = content.eval(coordB).b;
         half aChannel = content.eval(coordG).a;
         half3 keyRefract = half3(rChannel, gChannel, bChannel);
+
+        // Dark tint inside key as well so digits and letters remain readable over any content
+        keyRefract = mix(keyRefract, half3(0.0, 0.0, 0.0), half(uDarkTint));
 
         // 5. Soft specular highlight on top-left of each key (no stroke/border)
         float2 specCenter = closestCenter + float2(-0.35, -0.35) * R;
@@ -210,7 +230,7 @@ private const val KEYPAD_LIQUID_GLASS_SHADER_SRC = """
 
         // 6. Base glass translucent tint & press brightening
         half3 baseKeyTint = (uDarkTheme > 0.5) ? half3(1.0, 1.0, 1.0) : half3(1.0, 1.0, 1.0);
-        half baseKeyAlpha = (uDarkTheme > 0.5) ? 0.10 : 0.58;
+        half baseKeyAlpha = (uDarkTheme > 0.5) ? 0.08 : 0.55;
 
         if (float(closestIdx) == uPressedIndex) {
             baseKeyAlpha += half(0.12 * uPressedProgress);
@@ -302,6 +322,9 @@ fun DialerScreen(
     var pressedKeyProgress by remember { mutableFloatStateOf(0f) }
 
     var selectedContact by remember { mutableStateOf<ContactItem?>(null) }
+    val groupedRecentCalls = remember(recentCalls) { groupConsecutiveCallLogs(recentCalls) }
+    var expandedGroupId by remember { mutableStateOf<String?>(null) }
+    var selectedGroupDetail by remember { mutableStateOf<GroupedCallLogItem?>(null) }
 
     val keypadPanelHeightDp = with(density) { keypadPanelHeightPx.toDp() }
     val topBarHeightDp = with(density) { topBarHeightPx.toDp() }
@@ -355,6 +378,9 @@ fun DialerScreen(
         label = "listBottomPadding"
     )
 
+    val estimatedKeypadHeightDp = if (keypadPanelHeightDp > 150.dp) keypadPanelHeightDp else 480.dp
+    val listBottomContentPadding = estimatedKeypadHeightDp + bottomInsetPadding + 48.dp
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -376,12 +402,12 @@ fun DialerScreen(
                     drawLayer(listGraphicsLayer)
                 },
             contentPadding = PaddingValues(
-                top = topBarReservedHeightDp + 6.dp,
-                bottom = if (input.isNotEmpty()) 20.dp else keypadPanelHeightDp + 20.dp
+                top = topBarReservedHeightDp + 10.dp,
+                bottom = if (input.isNotEmpty()) 24.dp else listBottomContentPadding
             )
         ) {
             if (input.isEmpty()) {
-                if (recentCalls.isEmpty()) {
+                if (groupedRecentCalls.isEmpty()) {
                     item(key = "dial_recent_empty") {
                         Box(
                             modifier = Modifier
@@ -398,15 +424,22 @@ fun DialerScreen(
                     }
                 } else {
                     items(
-                        items = recentCalls,
-                        key = { "dial_recent_${it.id}" }
-                    ) { log ->
-                        DialerRecentCallRow(
-                            item = log,
+                        items = groupedRecentCalls,
+                        key = { "dial_grouped_${it.primary.id}_${it.count}" }
+                    ) { group ->
+                        DialerGroupedRecentCallRow(
+                            group = group,
                             showSimLabel = simAccounts.size > 1,
-                            onClick = {
-                                if (log.number.isNotBlank()) {
-                                    onCallClick(log.number, false)
+                            isExpanded = expandedGroupId == "${group.primary.id}",
+                            onToggleExpand = {
+                                expandedGroupId = if (expandedGroupId == "${group.primary.id}") null else "${group.primary.id}"
+                            },
+                            onOpenDetails = {
+                                selectedGroupDetail = group
+                            },
+                            onCallClick = { number ->
+                                if (number.isNotBlank()) {
+                                    onCallClick(number, false)
                                 }
                             }
                         )
@@ -455,21 +488,19 @@ fun DialerScreen(
 
         // Top overlay: Dual-SIM switcher pill (when > 1 SIM) + Settings button with reserved top bar space & soft fade
         if (showTopRow) {
+            val totalTopOverlayHeight = topBarReservedHeightDp + 24.dp
             Box(
                 modifier = Modifier
                     .align(Alignment.TopCenter)
                     .fillMaxWidth()
+                    .height(totalTopOverlayHeight)
                     .background(
                         Brush.verticalGradient(
                             0.00f to palette.background,
-                            0.75f to palette.background,
+                            0.70f to palette.background,
                             1.00f to Color.Transparent
                         )
                     )
-                    .windowInsetsPadding(WindowInsets.statusBars)
-                    .height(52.dp)
-                    .padding(horizontal = 20.dp),
-                contentAlignment = Alignment.Center
             ) {
                 var showSimMenu by remember { mutableStateOf(false) }
                 val activeSimLabel = remember(simAccounts, preferredSimId) {
@@ -477,7 +508,11 @@ fun DialerScreen(
                 }
 
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .windowInsetsPadding(WindowInsets.statusBars)
+                        .height(52.dp)
+                        .padding(horizontal = 20.dp),
                     horizontalArrangement = if (simAccounts.size > 1) Arrangement.SpaceBetween else Arrangement.End,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -639,12 +674,18 @@ fun DialerScreen(
                                         shader.setFloatUniform("uSpecular", KEYPAD_SPECULAR_STRENGTH)
                                         shader.setFloatUniform("uFadeTopPx", fadeTopPx)
                                         shader.setFloatUniform("uDarkTheme", if (palette.isDark) 1f else 0f)
+                                        shader.setFloatUniform("uDarkTint", KEYPAD_BACKDROP_DARK_TINT)
                                         shader.setFloatUniform("uPressedIndex", pressedKeyIndex.toFloat())
                                         shader.setFloatUniform("uPressedProgress", pressedKeyProgress)
 
-                                        renderEffect = RenderEffect
-                                            .createRuntimeShaderEffect(shader, "content")
-                                            .asComposeRenderEffect()
+                                        val blurPx = with(density) { KEYPAD_BACKDROP_BLUR_RADIUS_DP.dp.toPx() }
+                                        val blurEffect = RenderEffect.createBlurEffect(
+                                            blurPx,
+                                            blurPx,
+                                            Shader.TileMode.CLAMP
+                                        )
+                                        val shaderEffect = RenderEffect.createRuntimeShaderEffect(shader, "content")
+                                        renderEffect = RenderEffect.createChainEffect(shaderEffect, blurEffect).asComposeRenderEffect()
                                     } else {
                                         renderEffect = null
                                     }
@@ -833,11 +874,37 @@ fun DialerScreen(
                             enter = fadeIn() + scaleIn(initialScale = 0.85f),
                             exit = fadeOut() + scaleOut(targetScale = 0.85f)
                         ) {
+                            val interactionSource = remember { MutableInteractionSource() }
+                            val isPressed by interactionSource.collectIsPressedAsState()
+                            val pasteScale by animateFloatAsState(
+                                targetValue = if (isPressed) 0.92f else 1f,
+                                animationSpec = spring(dampingRatio = 0.70f, stiffness = 700f),
+                                label = "pasteScale"
+                            )
                             Box(
                                 modifier = Modifier
                                     .size(56.dp)
+                                    .graphicsLayer {
+                                        scaleX = pasteScale
+                                        scaleY = pasteScale
+                                    }
+                                    .clearLiquidGlassPill(
+                                        shape = CircleShape,
+                                        hazeState = null,
+                                        isDark = palette.isDark,
+                                        blurRadius = 12.dp,
+                                        tintAlpha = if (palette.isDark) 0.28f else 0.72f,
+                                        showBorder = true,
+                                        shadowElevation = 3.dp
+                                    )
                                     .clip(CircleShape)
-                                    .clickable {
+                                    .clickable(
+                                        interactionSource = interactionSource,
+                                        indication = null
+                                    ) {
+                                        if (dialpadVibrateEnabled) {
+                                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        }
                                         val pasted = clipboard.getText()?.text?.toString().orEmpty()
                                         val cleaned = PhoneFormatUtils.normalizeDialInput(pasted)
                                         if (cleaned.isNotBlank()) onSetNumber(cleaned)
@@ -847,8 +914,8 @@ fun DialerScreen(
                                 Icon(
                                     imageVector = Icons.Rounded.ContentPaste,
                                     contentDescription = "Paste number",
-                                    tint = palette.secondaryLabel,
-                                    modifier = Modifier.size(22.dp)
+                                    tint = palette.label,
+                                    modifier = Modifier.size(24.dp)
                                 )
                             }
                         }
@@ -941,16 +1008,34 @@ fun DialerScreen(
             onToggleBlock = onToggleBlock
         )
     }
+
+    val activeGroup = selectedGroupDetail
+    if (activeGroup != null) {
+        DialerCallDetailSheet(
+            group = activeGroup,
+            blockedNumbers = blockedNumbers,
+            onDismiss = { selectedGroupDetail = null },
+            onCallNumber = { number ->
+                selectedGroupDetail = null
+                onCallClick(number, false)
+            },
+            onToggleBlock = onToggleBlock
+        )
+    }
 }
 
 @Composable
-private fun DialerRecentCallRow(
-    item: CallLogItem,
+private fun DialerGroupedRecentCallRow(
+    group: GroupedCallLogItem,
     showSimLabel: Boolean,
-    onClick: () -> Unit
+    isExpanded: Boolean,
+    onToggleExpand: () -> Unit,
+    onOpenDetails: () -> Unit,
+    onCallClick: (String) -> Unit
 ) {
     val palette = LocalApplePalette.current
     val context = LocalContext.current
+    val item = group.primary
     val isMissed = item.type == CallLogType.MISSED || item.type == CallLogType.REJECTED
     val isBlocked = item.type == CallLogType.BLOCKED
     val hasSavedContact = !item.cachedName.isNullOrBlank()
@@ -961,11 +1046,12 @@ private fun DialerRecentCallRow(
     val formattedNumber = remember(item.number) {
         if (item.number.isNotBlank()) PhoneFormatUtils.formatDisplayNumber(item.number) else "Private Number"
     }
-    val primaryTitle = when {
+    val baseTitle = when {
         hasSavedContact -> item.displayTitle
         cnapName != null -> cnapName
         else -> formattedNumber
     }
+    val primaryTitle = if (group.count > 1) "$baseTitle (${group.count})" else baseTitle
 
     val dirIcon: ImageVector = when (item.type) {
         CallLogType.OUTGOING -> ApplePhoneIcons.PhoneArrowUpRight
@@ -1001,7 +1087,13 @@ private fun DialerRecentCallRow(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .clickable {
+                if (group.count > 1) {
+                    onToggleExpand()
+                } else {
+                    onOpenDetails()
+                }
+            }
     ) {
         Row(
             modifier = Modifier
@@ -1010,7 +1102,7 @@ private fun DialerRecentCallRow(
             verticalAlignment = Alignment.CenterVertically
         ) {
             ContactAvatar(
-                name = primaryTitle,
+                name = item.displayTitle,
                 photoUri = item.photoUri,
                 size = 36.dp,
                 photoUriLarge = item.photoFullUri
@@ -1046,7 +1138,7 @@ private fun DialerRecentCallRow(
                 }
             }
 
-            Spacer(modifier = Modifier.width(10.dp))
+            Spacer(modifier = Modifier.width(8.dp))
 
             Text(
                 text = PhoneFormatUtils.formatAppleRecentTime(item.timestamp),
@@ -1054,6 +1146,112 @@ private fun DialerRecentCallRow(
                 fontSize = 13.sp,
                 maxLines = 1
             )
+
+            Spacer(modifier = Modifier.width(4.dp))
+
+            IconButton(
+                onClick = onOpenDetails,
+                modifier = Modifier.size(32.dp)
+            ) {
+                Icon(
+                    imageVector = ApplePhoneIcons.InfoCircle,
+                    contentDescription = "Call details",
+                    tint = palette.accentBlue,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+        }
+
+        // Expandable cluster of consecutive calls
+        AnimatedVisibility(
+            visible = isExpanded && group.count > 1,
+            enter = fadeIn() + expandVertically(),
+            exit = fadeOut() + shrinkVertically()
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 68.dp, end = 20.dp, bottom = 8.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(palette.tertiaryFill)
+                    .padding(horizontal = 12.dp, vertical = 8.dp)
+            ) {
+                group.entries.forEachIndexed { idx, entry ->
+                    val entryIsMissed = entry.type == CallLogType.MISSED || entry.type == CallLogType.REJECTED
+                    val entryDirIcon = when (entry.type) {
+                        CallLogType.OUTGOING -> ApplePhoneIcons.PhoneArrowUpRight
+                        CallLogType.BLOCKED -> Icons.Rounded.Block
+                        else -> ApplePhoneIcons.PhoneArrowDownLeft
+                    }
+                    val entryDirTint = if (entryIsMissed || entry.type == CallLogType.BLOCKED) palette.callRed else palette.secondaryLabel
+                    val entryTypeLabel = when (entry.type) {
+                        CallLogType.OUTGOING -> "Outgoing"
+                        CallLogType.INCOMING -> "Incoming"
+                        CallLogType.MISSED -> "Missed"
+                        CallLogType.REJECTED -> "Declined"
+                        CallLogType.BLOCKED -> "Blocked"
+                        CallLogType.VOICEMAIL -> "Voicemail"
+                        CallLogType.UNKNOWN -> "Call"
+                    }
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = entryDirIcon,
+                                contentDescription = null,
+                                tint = entryDirTint,
+                                modifier = Modifier.size(11.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = PhoneFormatUtils.formatRelativeTime(entry.timestamp),
+                                color = palette.secondaryLabel,
+                                fontSize = 12.sp
+                            )
+                        }
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = entryTypeLabel,
+                                color = if (entryIsMissed) palette.callRed else palette.label,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                            if (entry.durationSeconds > 0L) {
+                                Text(
+                                    text = " (${PhoneFormatUtils.formatDuration(entry.durationSeconds)})",
+                                    color = palette.tertiaryLabel,
+                                    fontSize = 12.sp
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(8.dp))
+                            IconButton(
+                                onClick = { onCallClick(entry.number) },
+                                modifier = Modifier.size(24.dp)
+                            ) {
+                                Icon(
+                                    imageVector = ApplePhoneIcons.PhoneFill,
+                                    contentDescription = "Call",
+                                    tint = palette.callGreen,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    if (idx < group.entries.lastIndex) {
+                        HorizontalDivider(
+                            thickness = 0.5.dp,
+                            color = palette.separator.copy(alpha = 0.35f)
+                        )
+                    }
+                }
+            }
         }
 
         HorizontalDivider(
@@ -1061,6 +1259,261 @@ private fun DialerRecentCallRow(
             thickness = 0.5.dp,
             color = palette.separator.copy(alpha = 0.45f)
         )
+    }
+}
+
+@Composable
+private fun DialerSheetActionCircle(
+    icon: ImageVector,
+    label: String,
+    tint: Color,
+    onClick: () -> Unit
+) {
+    val palette = LocalApplePalette.current
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier.clickable(onClick = onClick)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(52.dp)
+                .clip(CircleShape)
+                .background(palette.tertiaryFill),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = label,
+                tint = tint,
+                modifier = Modifier.size(24.dp)
+            )
+        }
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(
+            text = label,
+            color = palette.label,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Normal
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DialerCallDetailSheet(
+    group: GroupedCallLogItem,
+    blockedNumbers: Set<String>,
+    onDismiss: () -> Unit,
+    onCallNumber: (String) -> Unit,
+    onToggleBlock: (String, Boolean) -> Unit
+) {
+    val context = LocalContext.current
+    val palette = LocalApplePalette.current
+    val primaryItem = group.primary
+    val hasSavedContact = !primaryItem.cachedName.isNullOrBlank()
+    val cnapName = if (!hasSavedContact) {
+        primaryItem.cnapName ?: CallManager.lookupCachedCnapName(primaryItem.number, context)
+    } else null
+    val effectiveTitle = if (!hasSavedContact && cnapName != null) cnapName else primaryItem.displayTitle
+    val formattedNumber = remember(primaryItem.number) {
+        PhoneFormatUtils.formatDisplayNumber(primaryItem.number)
+    }
+    val isBlocked = blockedNumbers.any {
+        it == primaryItem.number || PhoneFormatUtils.numbersMatch(it, primaryItem.number)
+    }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = palette.cardSurface,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            ContactAvatar(
+                name = effectiveTitle,
+                photoUri = primaryItem.photoUri,
+                photoUriLarge = primaryItem.photoFullUri,
+                size = 76.dp
+            )
+            Spacer(modifier = Modifier.height(10.dp))
+            Text(
+                text = effectiveTitle,
+                color = palette.label,
+                fontSize = 24.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+            if (cnapName != null) {
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = stringResource(R.string.cnap_operator_records_label),
+                    color = palette.secondaryLabel,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Normal
+                )
+            }
+            if (primaryItem.number.isNotBlank() && primaryItem.number != effectiveTitle) {
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = formattedNumber,
+                    color = palette.secondaryLabel,
+                    fontSize = 15.sp
+                )
+            }
+            Spacer(modifier = Modifier.height(6.dp))
+            val subtitle = buildList {
+                add(PhoneFormatUtils.formatRelativeTime(primaryItem.timestamp))
+                if (primaryItem.durationSeconds > 0L) {
+                    add(PhoneFormatUtils.formatDuration(primaryItem.durationSeconds))
+                }
+                if (!primaryItem.simLabel.isNullOrBlank()) {
+                    add(primaryItem.simLabel)
+                }
+            }.joinToString(" • ")
+            Text(
+                text = subtitle,
+                color = palette.tertiaryLabel,
+                fontSize = 13.sp
+            )
+
+            Spacer(modifier = Modifier.height(18.dp))
+
+            // Quick Apple circular action pills
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceEvenly
+            ) {
+                DialerSheetActionCircle(
+                    icon = ApplePhoneIcons.MessageFill,
+                    label = "message",
+                    tint = palette.accentBlue,
+                    onClick = {
+                        if (primaryItem.number.isNotBlank()) openSmsApp(context, primaryItem.number)
+                    }
+                )
+                DialerSheetActionCircle(
+                    icon = ApplePhoneIcons.PhoneFill,
+                    label = "call",
+                    tint = palette.callGreen,
+                    onClick = {
+                        onDismiss()
+                        if (primaryItem.number.isNotBlank()) onCallNumber(primaryItem.number)
+                    }
+                )
+                DialerSheetActionCircle(
+                    icon = Icons.Rounded.ContentCopy,
+                    label = "copy",
+                    tint = palette.accentBlue,
+                    onClick = {
+                        if (primaryItem.number.isNotBlank()) copyNumberToClipboard(context, primaryItem.number)
+                    }
+                )
+                if (primaryItem.cachedName.isNullOrBlank() && primaryItem.number.isNotBlank()) {
+                    DialerSheetActionCircle(
+                        icon = Icons.Rounded.PersonAdd,
+                        label = "save",
+                        tint = palette.accentBlue,
+                        onClick = {
+                            onDismiss()
+                            openAddContact(context, primaryItem.number)
+                        }
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(18.dp))
+
+            if (group.entries.isNotEmpty()) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(palette.tertiaryFill)
+                        .padding(horizontal = 16.dp, vertical = 12.dp)
+                ) {
+                    Text(
+                        text = if (group.entries.size == 1) "Call Detail" else "Call History (${group.entries.size})",
+                        color = palette.secondaryLabel,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    group.entries.take(8).forEachIndexed { idx, entry ->
+                        val typeLabel = when (entry.type) {
+                            CallLogType.OUTGOING -> "Outgoing Call"
+                            CallLogType.INCOMING -> "Incoming Call"
+                            CallLogType.MISSED -> "Missed Call"
+                            CallLogType.REJECTED -> "Declined Call"
+                            CallLogType.BLOCKED -> "Blocked Call"
+                            CallLogType.VOICEMAIL -> "Voicemail"
+                            CallLogType.UNKNOWN -> "Call"
+                        }
+                        val entryIsMissed = entry.type == CallLogType.MISSED || entry.type == CallLogType.REJECTED
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = PhoneFormatUtils.formatRelativeTime(entry.timestamp),
+                                color = palette.secondaryLabel,
+                                fontSize = 13.sp
+                            )
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = typeLabel,
+                                    color = if (entryIsMissed) palette.callRed else palette.label,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                                if (entry.durationSeconds > 0L) {
+                                    Text(
+                                        text = " • ${PhoneFormatUtils.formatDuration(entry.durationSeconds)}",
+                                        color = palette.tertiaryLabel,
+                                        fontSize = 13.sp
+                                    )
+                                }
+                            }
+                        }
+                        if (idx < group.entries.take(8).lastIndex) {
+                            HorizontalDivider(
+                                thickness = 0.5.dp,
+                                color = palette.separator.copy(alpha = 0.45f)
+                            )
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(14.dp))
+            }
+
+            if (primaryItem.number.isNotBlank()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(palette.tertiaryFill)
+                        .clickable {
+                            onToggleBlock(primaryItem.number, !isBlocked)
+                            onDismiss()
+                        }
+                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                    contentAlignment = Alignment.CenterStart
+                ) {
+                    Text(
+                        text = if (isBlocked) "Unblock this Caller" else "Block this Caller",
+                        color = if (isBlocked) palette.accentBlue else palette.callRed,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(28.dp))
+        }
     }
 }
 

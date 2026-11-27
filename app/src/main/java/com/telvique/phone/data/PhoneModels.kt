@@ -168,6 +168,26 @@ object PhoneFormatUtils {
             return trimmed
         }
 
+        val digitsOnly = trimmed.filter { it.isDigit() }
+        val startsWithPlus = trimmed.startsWith("+")
+
+        // Standard Indian mobile number normalized strictly to "+91 97469 85190"
+        val isLikelyIndianNumber = startsWithPlus && digitsOnly.startsWith("91") && digitsOnly.length == 12 && digitsOnly[2] in '6'..'9'
+            || digitsOnly.startsWith("91") && digitsOnly.length == 12 && digitsOnly[2] in '6'..'9'
+            || digitsOnly.startsWith("0") && digitsOnly.length == 11 && digitsOnly[1] in '6'..'9'
+            || digitsOnly.length == 10 && digitsOnly[0] in '6'..'9'
+
+        if (isLikelyIndianNumber) {
+            val mobile = when {
+                digitsOnly.length == 12 && digitsOnly.startsWith("91") -> digitsOnly.substring(2)
+                digitsOnly.length == 11 && digitsOnly.startsWith("0") -> digitsOnly.substring(1)
+                else -> digitsOnly
+            }
+            if (mobile.length == 10) {
+                return "+91 ${mobile.substring(0, 5)} ${mobile.substring(5)}"
+            }
+        }
+
         val iso = countryIso?.takeIf { it.isNotBlank() } ?: getDefaultCountryIso(context)
         val upperIso = iso.uppercase(Locale.ROOT)
 
@@ -177,24 +197,6 @@ object PhoneFormatUtils {
 
         if (formatted != null && !formatted.startsWith("(") && (upperIso != "IN" || !formatted.contains('('))) {
             return formatted
-        }
-
-        // Graceful Indian format fallback if PhoneNumberUtils produced US style or failed
-        if (upperIso == "IN") {
-            val digitsOnly = trimmed.filter { it.isDigit() }
-            when {
-                trimmed.startsWith("+91") && digitsOnly.startsWith("91") && digitsOnly.length == 12 -> {
-                    val mobile = digitsOnly.substring(2)
-                    return "+91 ${mobile.substring(0, 5)} ${mobile.substring(5)}"
-                }
-                trimmed.startsWith("0") && digitsOnly.length == 11 && (digitsOnly[1] in '6'..'9') -> {
-                    val mobile = digitsOnly.substring(1)
-                    return "0${mobile.substring(0, 5)} ${mobile.substring(5)}"
-                }
-                digitsOnly.length == 10 && (digitsOnly[0] in '6'..'9') -> {
-                    return "${digitsOnly.substring(0, 5)} ${digitsOnly.substring(5)}"
-                }
-            }
         }
 
         return formatted ?: trimmed

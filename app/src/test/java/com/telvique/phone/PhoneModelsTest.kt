@@ -30,9 +30,9 @@ class PhoneModelsTest {
 
     @Test
     fun formatDisplayNumber_formatsIndianNumbersCorrectly() {
-        assertEquals("97469 85190", PhoneFormatUtils.formatDisplayNumber("9746985190", "IN"))
+        assertEquals("+91 97469 85190", PhoneFormatUtils.formatDisplayNumber("9746985190", "IN"))
         assertEquals("+91 97469 85190", PhoneFormatUtils.formatDisplayNumber("+919746985190", "IN"))
-        assertEquals("097469 85190", PhoneFormatUtils.formatDisplayNumber("09746985190", "IN"))
+        assertEquals("+91 97469 85190", PhoneFormatUtils.formatDisplayNumber("09746985190", "IN"))
         assertEquals("*121#", PhoneFormatUtils.formatDisplayNumber("*121#", "IN"))
         assertEquals("Private Number", PhoneFormatUtils.formatDisplayNumber("Private Number", "IN"))
     }
