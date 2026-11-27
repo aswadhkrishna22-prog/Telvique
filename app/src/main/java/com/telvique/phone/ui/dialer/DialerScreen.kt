@@ -153,13 +153,13 @@ const val KEYPAD_INTENSITY_STOP_5 = 1.00f // at 1.00 (call button & bottom nav)
 const val KEYPAD_ROW_ALPHA_START = 1.00f
 const val KEYPAD_ROW_ALPHA_AT_ROW1 = 0.55f
 
-// Flat liquid-glass key constants: 6-9% alpha flat fill, no bulky center sphere, low refraction & dispersion
-const val KEYPAD_KEY_FILL_ALPHA_TOP = 0.08f // Translucent white fill top (~8% in dark mode, range 6-9%)
-const val KEYPAD_KEY_FILL_ALPHA_BOTTOM = 0.06f // Translucent white fill bottom (~6% in dark mode, range 6-9%)
+// Flat liquid-glass key constants: 13-16% alpha flat fill in dark mode for clear visibility and contrast, low refraction & dispersion
+const val KEYPAD_KEY_FILL_ALPHA_TOP = 0.16f // Translucent white fill top (~16% in dark mode)
+const val KEYPAD_KEY_FILL_ALPHA_BOTTOM = 0.13f // Translucent white fill bottom (~13% in dark mode)
 const val KEYPAD_KEY_REFRACTION_BLUR_DP = 6f // Light blur radius for key refraction layer (~6dp)
 const val KEYPAD_DISPERSION_STRENGTH = 0.012f // Low strength chromatic dispersion at rim only
 const val KEYPAD_REFRACTION_STRENGTH = 0.18f // Low strength rim-only lens refraction
-const val KEYPAD_SPECULAR_STRENGTH = 0.18f // Dim top-left rim highlight intensity (no center spot)
+const val KEYPAD_SPECULAR_STRENGTH = 0.22f // Dim top-left rim highlight intensity (no center spot)
 const val KEYPAD_FADE_TOP_DP = 6f // Short fade-in gradient at the top of the glass region
 
 // ── AGSL RUNTIME SHADER (LIQUID GLASS REFRACTION, CHROMATIC DISPERSION & SPECULAR) ──
@@ -233,12 +233,12 @@ private const val KEYPAD_LIQUID_GLASS_SHADER_SRC = """
 
         // 3. Thin soft rim sheen along top-left (dim gradient, no center spot)
         float angleToLight = dot(dir, float2(-0.7071, -0.7071));
-        float rimSheen = max(0.0, angleToLight) * pow(rNorm, 3.0) * 0.25;
+        float rimSheen = max(0.0, angleToLight) * pow(rNorm, 3.0) * 0.35;
         float totalSpec = rimSheen * uSpecular;
 
-        // 4. Flat base glass tint (translucent white 6-9%)
+        // 4. Flat base glass tint (translucent white 13-16%)
         half3 baseKeyTint = half3(1.0, 1.0, 1.0);
-        half baseKeyAlpha = (uDarkTheme > 0.5) ? 0.07 : 0.50;
+        half baseKeyAlpha = (uDarkTheme > 0.5) ? 0.14 : 0.50;
 
         if (float(closestIdx) == uPressedIndex) {
             baseKeyAlpha += half(0.08 * uPressedProgress);
@@ -455,23 +455,37 @@ fun DialerScreen(
                     }
                 }
             } else {
-                items(
-                    items = t9Matches,
-                    key = { "dial_match_${it.contact.id}_${it.matchedNumber}" }
-                ) { match ->
-                    DialerContactMatchRow(
-                        match = match,
-                        query = input,
-                        onRowClick = {
-                            if (match.matchedNumber.isNotBlank()) {
-                                onCallClick(match.matchedNumber, false)
-                            }
-                        },
-                        onOpenContact = { selectedContact = match.contact },
-                        rampTopInRootPx = rampTopInRootPx,
-                        keyRow1InRootPx = keyRow1InRootPx,
-                        rampDistancePx = rampDistancePx,
-                    )
+                if (t9Matches.isEmpty()) {
+                    item(key = "dial_t9_empty") {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 48.dp, horizontal = 24.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "No matching contacts",
+                                color = palette.secondaryLabel,
+                                fontSize = 15.sp
+                            )
+                        }
+                    }
+                } else {
+                    items(
+                        items = t9Matches,
+                        key = { "dial_match_${it.contact.id}_${it.matchedNumber}" }
+                    ) { match ->
+                        DialerContactMatchRow(
+                            match = match,
+                            query = input,
+                            onRowClick = {
+                                if (match.matchedNumber.isNotBlank()) {
+                                    onCallClick(match.matchedNumber, false)
+                                }
+                            },
+                            onOpenContact = { selectedContact = match.contact }
+                        )
+                    }
                 }
             }
         }
@@ -684,7 +698,7 @@ fun DialerScreen(
                     val cx1 = panelWidthPx / 2f
                     val cx2 = panelWidthPx - cx0
 
-                    val cy0 = with(density) { KEYPAD_GLASS_TOP_OFFSET_DP.dp.toPx() } + keyRadiusPx
+                    val cy0 = (keyGridTopInPanelPx - glassTopOffsetPx) + keyRadiusPx
                     val rowStepPx = with(density) { (76.dp + 8.dp).toPx() }
 
                     for (r in 0 until 4) {
@@ -770,7 +784,7 @@ fun DialerScreen(
                         top = 16.dp,
                         start = 20.dp,
                         end = 20.dp,
-                        bottom = bottomInsetPadding + 10.dp
+                        bottom = bottomInsetPadding + 18.dp
                     ),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
@@ -1140,46 +1154,19 @@ private fun DialerGroupedRecentCallRow(
         }
     }
 
-    var rowTopInRootPx by remember { mutableFloatStateOf(0f) }
-    var rowHeightPx by remember { mutableFloatStateOf(0f) }
-
-    val rowAlpha by remember(rowTopInRootPx, rowHeightPx, rampTopInRootPx, rampDistancePx) {
-        derivedStateOf {
-            if (rampTopInRootPx <= 0f || rampDistancePx <= 0f || rowHeightPx <= 0f) {
-                1.0f
-            } else {
-                val rowCenterInRoot = rowTopInRootPx + rowHeightPx * 0.5f
-                if (rowCenterInRoot <= rampTopInRootPx) {
-                    KEYPAD_ROW_ALPHA_START
-                } else if (rowCenterInRoot >= keyRow1InRootPx) {
-                    KEYPAD_ROW_ALPHA_AT_ROW1
-                } else {
-                    val fraction = ((rowCenterInRoot - rampTopInRootPx) / rampDistancePx).coerceIn(0f, 1f)
-                    KEYPAD_ROW_ALPHA_START + (KEYPAD_ROW_ALPHA_AT_ROW1 - KEYPAD_ROW_ALPHA_START) * fraction
-                }
-            }
-        }
-    }
-
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .onGloballyPositioned { coords ->
-                if (coords.isAttached) {
-                    rowTopInRootPx = coords.positionInRoot().y
-                    rowHeightPx = coords.size.height.toFloat()
-                }
-            }
-            .graphicsLayer {
-                alpha = rowAlpha
-            }
-            .clickable {
-                if (group.count > 1) {
-                    onToggleExpand()
-                } else {
-                    onOpenDetails()
-                }
-            }
+            .combinedClickable(
+                onClick = {
+                    if (group.count > 1) {
+                        onToggleExpand()
+                    } else if (item.number.isNotBlank()) {
+                        onCallClick(item.number)
+                    }
+                },
+                onLongClick = onOpenDetails
+            )
     ) {
         Row(
             modifier = Modifier
@@ -1650,39 +1637,9 @@ private fun DialerContactMatchRow(
         }
     }
 
-    var rowTopInRootPx by remember { mutableFloatStateOf(0f) }
-    var rowHeightPx by remember { mutableFloatStateOf(0f) }
-
-    val rowAlpha by remember(rowTopInRootPx, rowHeightPx, rampTopInRootPx, rampDistancePx) {
-        derivedStateOf {
-            if (rampTopInRootPx <= 0f || rampDistancePx <= 0f || rowHeightPx <= 0f) {
-                1.0f
-            } else {
-                val rowCenterInRoot = rowTopInRootPx + rowHeightPx * 0.5f
-                if (rowCenterInRoot <= rampTopInRootPx) {
-                    KEYPAD_ROW_ALPHA_START
-                } else if (rowCenterInRoot >= keyRow1InRootPx) {
-                    KEYPAD_ROW_ALPHA_AT_ROW1
-                } else {
-                    val fraction = ((rowCenterInRoot - rampTopInRootPx) / rampDistancePx).coerceIn(0f, 1f)
-                    KEYPAD_ROW_ALPHA_START + (KEYPAD_ROW_ALPHA_AT_ROW1 - KEYPAD_ROW_ALPHA_START) * fraction
-                }
-            }
-        }
-    }
-
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .onGloballyPositioned { coords ->
-                if (coords.isAttached) {
-                    rowTopInRootPx = coords.positionInRoot().y
-                    rowHeightPx = coords.size.height.toFloat()
-                }
-            }
-            .graphicsLayer {
-                alpha = rowAlpha
-            }
             .clickable(onClick = onRowClick)
     ) {
         Row(
