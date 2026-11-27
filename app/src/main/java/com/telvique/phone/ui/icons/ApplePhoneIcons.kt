@@ -575,6 +575,55 @@ object ApplePhoneIcons {
         }
     }
 
+    /** SF Symbol: bell.slash.fill — Apple silence / bell-slash */
+    val BellSlash: ImageVector by lazy {
+        symbol("BellSlash") {
+            // Diagonal slash
+            path(
+                stroke = FillBrush,
+                strokeLineWidth = 2.0f,
+                strokeLineCap = StrokeCap.Round
+            ) {
+                moveTo(3.5f, 3.5f)
+                lineTo(20.5f, 20.5f)
+            }
+            // Clapper
+            path(fill = FillBrush) {
+                moveTo(10.0f, 20.0f)
+                curveTo(10.0f, 21.1f, 10.9f, 22.0f, 12.0f, 22.0f)
+                curveTo(13.1f, 22.0f, 14.0f, 21.1f, 14.0f, 20.0f)
+                horizontalLineTo(10.0f)
+                close()
+            }
+            // Upper Bell body (interrupted by slash)
+            path(fill = FillBrush) {
+                moveTo(12.0f, 2.5f)
+                curveTo(11.45f, 2.5f, 11.0f, 2.95f, 11.0f, 3.5f)
+                verticalLineTo(4.25f)
+                curveTo(8.65f, 4.85f, 7.0f, 7.05f, 7.0f, 9.65f)
+                verticalLineTo(10.2f)
+                lineTo(13.8f, 17.0f)
+                horizontalLineTo(18.5f)
+                lineTo(17.5f, 15.0f)
+                verticalLineTo(9.65f)
+                curveTo(17.5f, 7.05f, 15.85f, 4.85f, 13.0f, 4.25f)
+                verticalLineTo(3.5f)
+                curveTo(13.0f, 2.95f, 12.55f, 2.5f, 12.0f, 2.5f)
+                close()
+            }
+            // Lower Left Flare
+            path(fill = FillBrush) {
+                moveTo(6.2f, 15.0f)
+                lineTo(4.5f, 17.0f)
+                curveTo(4.2f, 17.35f, 4.45f, 18.0f, 4.95f, 18.0f)
+                horizontalLineTo(14.8f)
+                lineTo(11.8f, 15.0f)
+                horizontalLineTo(6.2f)
+                close()
+            }
+        }
+    }
+
     /** SF Symbol: phone (thin rounded) — thin handset with rounded corners */
     val PhoneThinRounded: ImageVector by lazy {
         symbol("PhoneThinRounded") {
