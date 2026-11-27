@@ -12,6 +12,7 @@ import com.telvique.phone.TelviqueApp
 import com.telvique.phone.data.CallLogItem
 import com.telvique.phone.data.CallLogType
 import com.telvique.phone.data.ContactItem
+import com.telvique.phone.data.DialerContactMatch
 import com.telvique.phone.data.PhoneFormatUtils
 import com.telvique.phone.data.PhoneLayoutMode
 import com.telvique.phone.data.PhoneRepository
@@ -19,18 +20,24 @@ import com.telvique.phone.data.RecentsFilter
 import com.telvique.phone.data.SimAccountInfo
 import com.telvique.phone.data.T9Matcher
 import com.telvique.phone.data.TelviqueSettings
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 data class MainUiState(
     val dialerInput: String = "",
     val contacts: List<ContactItem> = emptyList(),
-    val t9Matches: List<ContactItem> = emptyList(),
+    val t9Matches: List<DialerContactMatch> = emptyList(),
     val callLogs: List<CallLogItem> = emptyList(),
     val recentsFilter: RecentsFilter = RecentsFilter.ALL,
     val recentsQuery: String = "",
@@ -134,7 +141,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
         CoreListsState(input, contacts, enrichedLogs, filter, rQuery)
-    }
+    }.flowOn(Dispatchers.Default)
+
+    @OptIn(FlowPreview::class)
+    private val t9MatchesFlow: Flow<List<DialerContactMatch>> = combine(
+        dialerInput
+            .debounce { query -> if (query.isBlank()) 0L else 65L }
+            .distinctUntilChanged(),
+        contactsFlow
+    ) { query, contacts ->
+        if (query.isBlank()) {
+            emptyList()
+        } else {
+            T9Matcher.rankMatches(contacts, query)
+        }
+    }.flowOn(Dispatchers.Default)
 
     private data class AuxiliaryState(
         val contactsQuery: String,
@@ -156,15 +177,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     val uiState: StateFlow<MainUiState> = combine(
         coreListsFlow,
+        t9MatchesFlow,
         auxiliaryFlow,
         pendingSimChoiceNumber,
         systemBlockedNumbersFlow,
-    ) { core, aux, simChoiceNumber, systemBlocked ->
-        val t9 = if (core.dialerInput.isBlank()) {
-            emptyList()
-        } else {
-            core.contacts.filter { T9Matcher.matches(it, core.dialerInput) }.take(6)
-        }
+    ) { core, t9, aux, simChoiceNumber, systemBlocked ->
         val mergedBlocked = aux.settings.blockedNumbers + systemBlocked
         MainUiState(
             dialerInput = core.dialerInput,

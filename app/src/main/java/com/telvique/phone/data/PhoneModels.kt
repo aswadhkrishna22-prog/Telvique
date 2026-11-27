@@ -273,6 +273,12 @@ object PhoneFormatUtils {
     }
 }
 
+data class DialerContactMatch(
+    val contact: ContactItem,
+    val matchedNumber: String,
+    val score: Int = 0
+)
+
 object T9Matcher {
     private val charToDigitMap = mapOf(
         'a' to '2', 'b' to '2', 'c' to '2',
@@ -326,6 +332,159 @@ object T9Matcher {
             (normalizedDigitsQuery.isNotEmpty() && digits.contains(normalizedDigitsQuery)) ||
                 entry.number.contains(query, ignoreCase = true)
         }
+    }
+
+    /**
+     * Scores and ranks contacts by match quality against a dialer query (number digits or T9 name).
+     */
+    fun rankMatches(
+        contacts: List<ContactItem>,
+        rawQuery: String,
+        limit: Int = 25
+    ): List<DialerContactMatch> {
+        val query = rawQuery.trim()
+        if (query.isEmpty()) return emptyList()
+
+        val normalizedDigits = query.filter { it.isDigit() }
+        val normalizedWithPlus = PhoneFormatUtils.normalizeDigits(query)
+        val lowerQuery = query.lowercase(Locale.getDefault())
+        val results = mutableListOf<DialerContactMatch>()
+
+        for (contact in contacts) {
+            var bestScore = -1
+            var bestNumber = contact.primaryNumber
+
+            for (entry in contact.numbers) {
+                val entryDigits = entry.number.filter { it.isDigit() }
+                val entryWithPlus = PhoneFormatUtils.normalizeDigits(entry.number)
+                val localTail = if (entryDigits.length > 10) entryDigits.takeLast(10) else entryDigits
+
+                val numberScore = when {
+                    normalizedWithPlus.startsWith("+") && entryWithPlus == normalizedWithPlus -> 1020
+                    normalizedDigits.isNotEmpty() && (entryDigits == normalizedDigits || localTail == normalizedDigits) -> 1000
+                    normalizedWithPlus.startsWith("+") && entryWithPlus.startsWith(normalizedWithPlus) -> 900
+                    normalizedDigits.isNotEmpty() && entryDigits.startsWith(normalizedDigits) -> 880
+                    normalizedDigits.isNotEmpty() && localTail.startsWith(normalizedDigits) -> 850
+                    normalizedWithPlus.startsWith("+") && entryWithPlus.contains(normalizedWithPlus) -> {
+                        val idx = entryWithPlus.indexOf(normalizedWithPlus)
+                        600 - idx.coerceAtMost(100)
+                    }
+                    normalizedDigits.isNotEmpty() && entryDigits.contains(normalizedDigits) -> {
+                        val idx = entryDigits.indexOf(normalizedDigits)
+                        550 - idx.coerceAtMost(100)
+                    }
+                    entry.number.contains(query, ignoreCase = true) -> 480
+                    else -> -1
+                }
+
+                if (numberScore > bestScore) {
+                    bestScore = numberScore
+                    bestNumber = entry.number
+                }
+            }
+
+            val lowerName = contact.name.lowercase(Locale.getDefault())
+            var nameScore = -1
+            if (lowerName.contains(lowerQuery)) {
+                nameScore = if (lowerName.startsWith(lowerQuery)) 780 else 620
+            }
+
+            if (normalizedDigits.isNotEmpty()) {
+                val nameT9 = toT9Digits(contact.name)
+                if (nameT9.startsWith(normalizedDigits)) {
+                    nameScore = maxOf(nameScore, 760)
+                } else {
+                    val words = contact.name.split(' ', '-', '_').filter { it.isNotBlank() }
+                    val wordPrefixMatch = words.any { toT9Digits(it).startsWith(normalizedDigits) }
+                    if (wordPrefixMatch) {
+                        nameScore = maxOf(nameScore, 700)
+                    }
+
+                    val initialsT9 = words.mapNotNull { word ->
+                        val first = word.first().lowercaseChar()
+                        charToDigitMap[first] ?: first.takeIf { it.isDigit() }
+                    }.joinToString("")
+                    if (initialsT9.startsWith(normalizedDigits)) {
+                        nameScore = maxOf(nameScore, 660)
+                    } else if (initialsT9.contains(normalizedDigits)) {
+                        nameScore = maxOf(nameScore, 520)
+                    }
+
+                    val t9Idx = nameT9.indexOf(normalizedDigits)
+                    if (t9Idx >= 0) {
+                        nameScore = maxOf(nameScore, 420 - t9Idx.coerceAtMost(80))
+                    }
+                }
+            }
+
+            val finalBaseScore = maxOf(bestScore, nameScore)
+            if (finalBaseScore >= 0) {
+                val starBonus = if (contact.isStarred) 20 else 0
+                results.add(
+                    DialerContactMatch(
+                        contact = contact,
+                        matchedNumber = bestNumber.ifBlank { contact.primaryNumber },
+                        score = finalBaseScore + starBonus
+                    )
+                )
+            }
+        }
+
+        return results
+            .sortedWith(
+                compareByDescending<DialerContactMatch> { it.score }
+                    .thenBy { it.contact.name.lowercase(Locale.getDefault()) }
+            )
+            .take(limit)
+    }
+
+    /**
+     * Maps the first contiguous match of query digits onto character ranges in [displayNumber],
+     * skipping spaces/dashes/parentheses so matched digits can be highlighted cleanly.
+     */
+    fun findMatchedDigitCharRanges(displayNumber: String, rawQuery: String): List<IntRange> {
+        val queryTrimmed = rawQuery.trim()
+        if (queryTrimmed.isEmpty() || displayNumber.isEmpty()) return emptyList()
+
+        val includePlus = queryTrimmed.startsWith("+")
+        val searchableQuery = if (includePlus) {
+            queryTrimmed.filter { it.isDigit() || it == '+' }
+        } else {
+            queryTrimmed.filter { it.isDigit() }
+        }
+        if (searchableQuery.isEmpty()) return emptyList()
+
+        val charIndices = mutableListOf<Int>()
+        val tokens = StringBuilder(displayNumber.length)
+        displayNumber.forEachIndexed { index, ch ->
+            if (ch.isDigit() || (includePlus && ch == '+')) {
+                tokens.append(ch)
+                charIndices.add(index)
+            }
+        }
+
+        val matchStart = tokens.indexOf(searchableQuery)
+        if (matchStart < 0) return emptyList()
+
+        val matchedCharPositions = (matchStart until matchStart + searchableQuery.length)
+            .map { charIndices[it] }
+
+        if (matchedCharPositions.isEmpty()) return emptyList()
+        val ranges = mutableListOf<IntRange>()
+        var rangeStart = matchedCharPositions.first()
+        var prev = rangeStart
+        for (i in 1 until matchedCharPositions.size) {
+            val curr = matchedCharPositions[i]
+            if (curr == prev + 1) {
+                prev = curr
+            } else {
+                ranges.add(rangeStart..prev)
+                rangeStart = curr
+                prev = curr
+            }
+        }
+        ranges.add(rangeStart..prev)
+        return ranges
     }
 }
 
