@@ -6,6 +6,9 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
 import android.provider.ContactsContract
 import android.telecom.CallAudioState
 import android.telecom.TelecomManager
@@ -29,11 +32,12 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -93,19 +97,27 @@ import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.onLongClick
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
@@ -134,6 +146,7 @@ import com.telvique.phone.TelviqueApp
 import com.telvique.phone.data.ContactItem
 import com.telvique.phone.data.PhoneFormatUtils
 import com.telvique.phone.data.PhoneRepository
+import com.telvique.phone.data.SlideToAnswerUtils
 import com.telvique.phone.data.TelviqueSettings
 import com.telvique.phone.telecom.CallAudioUiState
 import com.telvique.phone.telecom.CallManager
@@ -1793,38 +1806,59 @@ private fun AppleSlideToAnswerPill(
 ) {
     val density = LocalDensity.current
     val haptics = LocalHapticFeedback.current
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
     var isAnswerTriggered by remember(callId) { mutableStateOf(false) }
     var isDeclineTriggered by remember(callId) { mutableStateOf(false) }
     val offsetX = remember(callId) { Animatable(0f) }
+    val holdProgress = remember(callId) { Animatable(0f) }
+
+    val vibrator = remember(context) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            context.getSystemService(VibratorManager::class.java)?.defaultVibrator
+        } else {
+            @Suppress("DEPRECATION")
+            context.getSystemService(Vibrator::class.java)
+        }
+    }
+
+    fun performHoldTick() {
+        runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && vibrator?.hasVibrator() == true) {
+                vibrator.vibrate(VibrationEffect.createPredefined(VibrationEffect.EFFECT_TICK))
+            } else if (vibrator?.hasVibrator() == true) {
+                @Suppress("DEPRECATION")
+                vibrator.vibrate(15L)
+            }
+        }
+    }
+
+    fun performDeclineHaptic() {
+        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+        runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && vibrator?.hasVibrator() == true) {
+                vibrator.vibrate(VibrationEffect.createPredefined(VibrationEffect.EFFECT_HEAVY_CLICK))
+            } else if (vibrator?.hasVibrator() == true) {
+                @Suppress("DEPRECATION")
+                vibrator.vibrate(40L)
+            }
+        }
+    }
 
     LaunchedEffect(callPhase, callId) {
         if (callPhase != CallPhase.RINGING) {
             isAnswerTriggered = false
             isDeclineTriggered = false
             offsetX.snapTo(0f)
+            holdProgress.snapTo(0f)
         }
     }
 
-    Column(
+    Box(
         modifier = modifier,
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(20.dp)
+        contentAlignment = Alignment.Center
     ) {
-        // Separate, clearly accessible red Decline action
-        AppleSolidCallCircle(
-            icon = ApplePhoneIcons.PhoneDownFill,
-            label = "Decline",
-            containerColor = TelviqueColors.CallRed,
-            onClick = {
-                if (!isDeclineTriggered && !isAnswerTriggered && callPhase == CallPhase.RINGING) {
-                    isDeclineTriggered = true
-                    onDecline()
-                }
-            }
-        )
-
         // Slide to Answer Track
         BoxWithConstraints(
             modifier = Modifier
@@ -1837,7 +1871,7 @@ private fun AppleSlideToAnswerPill(
             val maxDragPx = with(density) {
                 (maxWidth - (trackPadding * 2) - thumbSize).toPx().coerceAtLeast(1f)
             }
-            val completionThreshold = maxDragPx * 0.72f
+            val completionThreshold = maxDragPx * SlideToAnswerUtils.COMPLETION_THRESHOLD_RATIO
 
             // Infinite shimmer transition across the track
             val infiniteTransition = rememberInfiniteTransition(label = "shimmer_transition")
@@ -1870,6 +1904,7 @@ private fun AppleSlideToAnswerPill(
                     isAnswerTriggered = true
                     haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                     scope.launch {
+                        holdProgress.snapTo(0f)
                         offsetX.animateTo(
                             targetValue = maxDragPx,
                             animationSpec = spring(
@@ -1883,6 +1918,23 @@ private fun AppleSlideToAnswerPill(
                     }
                 }
             }
+
+            fun triggerDecline() {
+                if (!isAnswerTriggered && !isDeclineTriggered && callPhase == CallPhase.RINGING) {
+                    isDeclineTriggered = true
+                    performDeclineHaptic()
+                    scope.launch {
+                        holdProgress.snapTo(1f)
+                        if (callPhase == CallPhase.RINGING) {
+                            onDecline()
+                        }
+                    }
+                }
+            }
+
+            val accessibilityDescription = stringResource(R.string.slide_to_answer_talkback_description)
+            val answerLabel = stringResource(R.string.action_answer_call)
+            val declineLabel = stringResource(R.string.action_decline_call)
 
             Box(
                 modifier = Modifier
@@ -1901,15 +1953,30 @@ private fun AppleSlideToAnswerPill(
                     .padding(trackPadding)
                     .semantics(mergeDescendants = true) {
                         role = Role.Button
-                        contentDescription = "Slide to answer incoming call"
-                        stateDescription = if (isAnswerTriggered) "Answering" else "Ready to slide"
-                        onClick(label = "Answer incoming call") {
+                        contentDescription = accessibilityDescription
+                        stateDescription = when {
+                            isAnswerTriggered -> "Answering"
+                            isDeclineTriggered -> "Declining"
+                            holdProgress.value > 0f -> "Holding to decline"
+                            else -> "Ready to slide"
+                        }
+                        onClick(label = answerLabel) {
                             triggerAnswer()
                             true
                         }
+                        onLongClick(label = declineLabel) {
+                            triggerDecline()
+                            true
+                        }
+                        customActions = listOf(
+                            CustomAccessibilityAction(label = declineLabel) {
+                                triggerDecline()
+                                true
+                            }
+                        )
                     }
             ) {
-                val textAlpha = (1f - (offsetX.value / maxDragPx) * 1.5f).coerceIn(0f, 1f)
+                val textAlpha = SlideToAnswerUtils.calculateTextAlpha(offsetX.value, maxDragPx)
 
                 Text(
                     text = "slide to answer  ›",
@@ -1924,47 +1991,116 @@ private fun AppleSlideToAnswerPill(
                         .alpha(textAlpha)
                 )
 
-                // Draggable Green Circular Thumb
+                val thumbScale = if (holdProgress.value > 0f) {
+                    1f - (0.05f * holdProgress.value)
+                } else {
+                    1f
+                }
+
+                // Draggable Green Circular Thumb with Long-Press-to-Decline
                 Box(
                     modifier = Modifier
                         .offset { IntOffset(offsetX.value.roundToInt(), 0) }
                         .size(thumbSize)
+                        .graphicsLayer {
+                            scaleX = thumbScale
+                            scaleY = thumbScale
+                        }
                         .shadow(elevation = 6.dp, shape = CircleShape, clip = false)
                         .clip(CircleShape)
                         .background(TelviqueColors.CallGreen, CircleShape)
                         .border(1.dp, Color.White.copy(alpha = 0.35f), CircleShape)
                         .liquidBubbleHighlight(isDark = false, cornerFraction = 0.5f) { 0.85f }
-                        .clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null,
-                            enabled = !isAnswerTriggered && !isDeclineTriggered && callPhase == CallPhase.RINGING
-                        ) {
-                            // Accessible single-tap fallback for users unable to swipe
-                            triggerAnswer()
-                        }
                         .pointerInput(maxDragPx, isAnswerTriggered, isDeclineTriggered, callPhase) {
-                            if (!isAnswerTriggered && !isDeclineTriggered && callPhase == CallPhase.RINGING) {
-                                detectHorizontalDragGestures(
-                                    onDragStart = { /* started dragging */ },
-                                    onDragEnd = {
-                                        if (!isAnswerTriggered && !isDeclineTriggered && callPhase == CallPhase.RINGING) {
-                                            if (offsetX.value >= completionThreshold) {
-                                                triggerAnswer()
-                                            } else {
+                            if (isAnswerTriggered || isDeclineTriggered || callPhase != CallPhase.RINGING) return@pointerInput
+
+                            awaitEachGesture {
+                                val down = awaitFirstDown(requireUnconsumed = false)
+                                if (isAnswerTriggered || isDeclineTriggered || callPhase != CallPhase.RINGING) return@awaitEachGesture
+
+                                val startPosition = down.position
+                                val touchSlop = viewConfiguration.touchSlop
+                                var isSliding = offsetX.value > touchSlop
+                                var holdCompleted = false
+
+                                val holdJob = if (!isSliding) {
+                                    scope.launch {
+                                        performHoldTick()
+                                        val remainingProgress = (1f - holdProgress.value).coerceAtLeast(0f)
+                                        val duration = (SlideToAnswerUtils.DEFAULT_HOLD_DURATION_MS * remainingProgress).toLong().coerceAtLeast(1L)
+                                        holdProgress.animateTo(
+                                            targetValue = 1f,
+                                            animationSpec = tween(
+                                                durationMillis = duration.toInt(),
+                                                easing = LinearEasing
+                                            )
+                                        )
+                                        if (!isAnswerTriggered && !isDeclineTriggered && callPhase == CallPhase.RINGING && !isSliding) {
+                                            holdCompleted = true
+                                            triggerDecline()
+                                        }
+                                    }
+                                } else null
+
+                                try {
+                                    while (true) {
+                                        val event = awaitPointerEvent()
+                                        val change = event.changes.firstOrNull { it.id == down.id } ?: break
+
+                                        if (change.isConsumed) {
+                                            break
+                                        }
+
+                                        if (!change.pressed) {
+                                            change.consume()
+                                            break
+                                        }
+
+                                        val currentPos = change.position
+                                        val deltaX = currentPos.x - startPosition.x
+                                        val deltaY = currentPos.y - startPosition.y
+                                        val distance = kotlin.math.hypot(deltaX, deltaY)
+
+                                        if (!isSliding) {
+                                            if (SlideToAnswerUtils.shouldCancelHoldForMovement(distance, touchSlop)) {
+                                                isSliding = true
+                                                holdJob?.cancel()
                                                 scope.launch {
-                                                    offsetX.animateTo(
-                                                        targetValue = 0f,
-                                                        animationSpec = spring(
-                                                            dampingRatio = Spring.DampingRatioLowBouncy,
-                                                            stiffness = Spring.StiffnessMediumLow
-                                                        )
-                                                    )
+                                                    holdProgress.animateTo(0f, tween(150))
+                                                }
+                                                val initialOffset = deltaX.coerceIn(0f, maxDragPx)
+                                                scope.launch {
+                                                    offsetX.snapTo(initialOffset)
+                                                }
+                                            }
+                                        } else {
+                                            change.consume()
+                                            if (!isAnswerTriggered && !isDeclineTriggered && callPhase == CallPhase.RINGING) {
+                                                val dragDelta = change.positionChange().x
+                                                val newOffset = (offsetX.value + dragDelta).coerceIn(0f, maxDragPx)
+                                                scope.launch {
+                                                    offsetX.snapTo(newOffset)
+                                                }
+                                                if (newOffset >= maxDragPx) {
+                                                    triggerAnswer()
+                                                    break
                                                 }
                                             }
                                         }
-                                    },
-                                    onDragCancel = {
-                                        if (!isAnswerTriggered) {
+                                    }
+                                } finally {
+                                    holdJob?.cancel()
+
+                                    if (!holdCompleted && !isDeclineTriggered) {
+                                        scope.launch {
+                                            holdProgress.animateTo(0f, tween(180))
+                                        }
+                                    }
+
+                                    if (isSliding && !isAnswerTriggered && !isDeclineTriggered) {
+                                        if (offsetX.value >= completionThreshold) {
+                                            triggerAnswer()
+                                        } else {
                                             scope.launch {
                                                 offsetX.animateTo(
                                                     targetValue = 0f,
@@ -1976,17 +2112,6 @@ private fun AppleSlideToAnswerPill(
                                             }
                                         }
                                     }
-                                ) { change, dragAmount ->
-                                    if (!isAnswerTriggered && !isDeclineTriggered && callPhase == CallPhase.RINGING) {
-                                        change.consume()
-                                        val targetOffset = (offsetX.value + dragAmount).coerceIn(0f, maxDragPx)
-                                        scope.launch {
-                                            offsetX.snapTo(targetOffset)
-                                        }
-                                        if (targetOffset >= maxDragPx) {
-                                            triggerAnswer()
-                                        }
-                                    }
                                 }
                             }
                         },
@@ -1994,10 +2119,47 @@ private fun AppleSlideToAnswerPill(
                 ) {
                     Icon(
                         imageVector = ApplePhoneIcons.PhoneFill,
-                        contentDescription = "Slide to Answer",
+                        contentDescription = null,
                         tint = Color.White,
                         modifier = Modifier.size(28.dp)
                     )
+
+                    // Subtle red progress animation around the slider handle while holding
+                    if (holdProgress.value > 0f) {
+                        Canvas(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(1.5.dp)
+                        ) {
+                            val strokeWidth = 3.dp.toPx()
+                            val diameter = size.minDimension - strokeWidth
+                            val topLeftOffset = Offset(strokeWidth / 2f, strokeWidth / 2f)
+                            val arcSize = Size(diameter, diameter)
+
+                            // Subtle guide track behind the progress arc
+                            drawArc(
+                                color = TelviqueColors.CallRed.copy(alpha = 0.22f * holdProgress.value),
+                                startAngle = 0f,
+                                sweepAngle = 360f,
+                                useCenter = false,
+                                topLeft = topLeftOffset,
+                                size = arcSize,
+                                style = Stroke(width = strokeWidth)
+                            )
+
+                            // Active subtle red progress arc filling clockwise from 12 o'clock
+                            val sweep = SlideToAnswerUtils.calculateSweepAngle(holdProgress.value)
+                            drawArc(
+                                color = TelviqueColors.CallRed,
+                                startAngle = -90f,
+                                sweepAngle = sweep,
+                                useCenter = false,
+                                topLeft = topLeftOffset,
+                                size = arcSize,
+                                style = Stroke(width = strokeWidth, cap = StrokeCap.Round)
+                            )
+                        }
+                    }
                 }
             }
         }
