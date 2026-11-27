@@ -1,7 +1,10 @@
 package com.telvique.phone.data
 
+import android.content.Context
 import android.telecom.PhoneAccountHandle
 import android.telephony.PhoneNumberUtils
+import android.telephony.TelephonyManager
+import com.telvique.phone.TelviqueApp
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -136,13 +139,65 @@ object PhoneFormatUtils {
     fun normalizeDialInput(input: String): String =
         input.filter { it.isDigit() || it == '+' || it == '*' || it == '#' || it == ',' || it == ';' }
 
-    fun formatDisplayNumber(number: String): String {
+    fun getDefaultCountryIso(context: Context? = null): String {
+        val ctx = context ?: runCatching { TelviqueApp.instance }.getOrNull()
+        if (ctx != null) {
+            val tm = ctx.getSystemService(TelephonyManager::class.java)
+            if (tm != null) {
+                val simCountry = runCatching { tm.simCountryIso }.getOrNull()?.trim()
+                if (!simCountry.isNullOrBlank()) {
+                    return simCountry.uppercase(Locale.ROOT)
+                }
+                val networkCountry = runCatching { tm.networkCountryIso }.getOrNull()?.trim()
+                if (!networkCountry.isNullOrBlank()) {
+                    return networkCountry.uppercase(Locale.ROOT)
+                }
+            }
+        }
+        val localeCountry = Locale.getDefault().country.trim()
+        return if (localeCountry.isNotBlank() && localeCountry.length == 2 && !localeCountry.equals("US", ignoreCase = true)) {
+            localeCountry.uppercase(Locale.ROOT)
+        } else {
+            "IN"
+        }
+    }
+
+    fun formatDisplayNumber(number: String, countryIso: String? = null, context: Context? = null): String {
         val trimmed = number.trim()
-        if (trimmed.isEmpty() || trimmed.contains('*') || trimmed.contains('#')) return trimmed
-        val country = Locale.getDefault().country.ifBlank { "IN" }
-        return runCatching {
-            PhoneNumberUtils.formatNumber(trimmed, country)
-        }.getOrNull()?.takeIf { it.isNotBlank() } ?: trimmed
+        if (trimmed.isEmpty() || trimmed.contains('*') || trimmed.contains('#') || !trimmed.any { it.isDigit() }) {
+            return trimmed
+        }
+
+        val iso = countryIso?.takeIf { it.isNotBlank() } ?: getDefaultCountryIso(context)
+        val upperIso = iso.uppercase(Locale.ROOT)
+
+        val formatted = runCatching {
+            PhoneNumberUtils.formatNumber(trimmed, upperIso)
+        }.getOrNull()?.takeIf { it.isNotBlank() }
+
+        if (formatted != null && !formatted.startsWith("(") && (upperIso != "IN" || !formatted.contains('('))) {
+            return formatted
+        }
+
+        // Graceful Indian format fallback if PhoneNumberUtils produced US style or failed
+        if (upperIso == "IN") {
+            val digitsOnly = trimmed.filter { it.isDigit() }
+            when {
+                trimmed.startsWith("+91") && digitsOnly.startsWith("91") && digitsOnly.length == 12 -> {
+                    val mobile = digitsOnly.substring(2)
+                    return "+91 ${mobile.substring(0, 5)} ${mobile.substring(5)}"
+                }
+                trimmed.startsWith("0") && digitsOnly.length == 11 && (digitsOnly[1] in '6'..'9') -> {
+                    val mobile = digitsOnly.substring(1)
+                    return "0${mobile.substring(0, 5)} ${mobile.substring(5)}"
+                }
+                digitsOnly.length == 10 && (digitsOnly[0] in '6'..'9') -> {
+                    return "${digitsOnly.substring(0, 5)} ${digitsOnly.substring(5)}"
+                }
+            }
+        }
+
+        return formatted ?: trimmed
     }
 
     fun comparableTail(input: String): String {

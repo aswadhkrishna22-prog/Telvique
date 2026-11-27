@@ -24,6 +24,7 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -36,10 +37,12 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -80,6 +83,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -90,6 +95,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -122,7 +132,6 @@ import com.telvique.phone.telecom.CallPhase
 import com.telvique.phone.telecom.CallUiItem
 import com.telvique.phone.telecom.TelecomUiState
 import com.telvique.phone.ui.components.ContactAvatar
-import com.telvique.phone.ui.components.posterColorsForName
 import com.telvique.phone.ui.contacts.AppleSearchField
 import com.telvique.phone.ui.glass.backdropLiquidGlass
 import com.telvique.phone.ui.glass.isBackdropGlassCapable
@@ -296,51 +305,40 @@ private fun CallScreen(
     val glassCapable = isBackdropGlassCapable()
     val posterBackdrop = if (glassCapable) {
         rememberLayerBackdrop {
-            drawRect(Color(0xFF0A0B0E))
+            drawRect(Color(0xFF08090C))
             drawContent()
         }
     } else null
 
-    val posterName = primary?.displayName ?: "Telvique"
-    val (posterTop, posterBottom) = posterColorsForName(posterName)
+    val hasPhoto = !primary?.photoUri.isNullOrBlank()
 
     Box(modifier = Modifier.fillMaxSize()) {
-        // Layer 1: Full-bleed Apple Contact Poster atmospheric background (captured by Kyant Backdrop!)
+        // Layer 1: Edge-to-edge Apple Contact Poster backdrop or solid near-black fallback (captured by Kyant Backdrop!)
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .then(if (posterBackdrop != null) Modifier.layerBackdrop(posterBackdrop) else Modifier)
-                .background(
-                    Brush.verticalGradient(
-                        listOf(
-                            posterTop.copy(alpha = 0.72f),
-                            posterBottom.copy(alpha = 0.56f),
-                            Color(0xFF0D1017),
-                            Color(0xFF050608),
-                        )
-                    )
-                )
+                .background(Color(0xFF08090C))
         ) {
-            if (!primary?.photoUri.isNullOrBlank()) {
+            if (hasPhoto) {
                 AsyncImage(
                     model = primary?.photoUri,
                     contentDescription = null,
                     contentScale = ContentScale.Crop,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .alpha(0.48f)
-                        .blur(48.dp)
+                    modifier = Modifier.fillMaxSize()
                 )
+                // Cinematic vertical vignette gradients for AA+ text and glass controls contrast
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
                         .background(
                             Brush.verticalGradient(
-                                listOf(
-                                    Color.Black.copy(alpha = 0.35f),
-                                    Color.Black.copy(alpha = 0.45f),
-                                    Color.Black.copy(alpha = 0.78f),
-                                )
+                                0.0f to Color.Black.copy(alpha = 0.72f),
+                                0.30f to Color.Black.copy(alpha = 0.40f),
+                                0.48f to Color.Transparent,
+                                0.60f to Color.Transparent,
+                                0.78f to Color.Black.copy(alpha = 0.52f),
+                                1.0f to Color.Black.copy(alpha = 0.88f)
                             )
                         )
                 )
@@ -352,7 +350,8 @@ private fun CallScreen(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .safeDrawingPadding(),
+                    .statusBarsPadding()
+                    .navigationBarsPadding(),
                 contentAlignment = Alignment.Center
             ) {
                 Text(
@@ -366,8 +365,9 @@ private fun CallScreen(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .safeDrawingPadding()
-                    .padding(horizontal = 24.dp, vertical = 18.dp),
+                    .statusBarsPadding()
+                    .navigationBarsPadding()
+                    .padding(horizontal = 24.dp, vertical = 12.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 if (secondary != null) {
@@ -403,17 +403,17 @@ private fun CallScreen(
                     }
                     Spacer(modifier = Modifier.height(14.dp))
                 } else {
-                    Spacer(modifier = Modifier.height(20.dp))
+                    Spacer(modifier = Modifier.height(16.dp))
                 }
 
                 // Status / Live tabular timer above Caller Name (iOS Contact Poster style)
                 val statusText = when (primary.phase) {
-                    CallPhase.NEW, CallPhase.DIALING -> "calling..."
-                    CallPhase.RINGING -> "Incoming Call"
-                    CallPhase.HOLDING -> "On Hold"
+                    CallPhase.NEW, CallPhase.DIALING -> "Calling..."
+                    CallPhase.RINGING -> "Incoming call"
+                    CallPhase.HOLDING -> "On hold"
                     CallPhase.ACTIVE -> PhoneFormatUtils.formatTimer(elapsedSeconds)
-                    CallPhase.DISCONNECTING -> "ending..."
-                    CallPhase.DISCONNECTED -> primary.disconnectCauseLabel ?: "Call Ended"
+                    CallPhase.DISCONNECTING -> "Ending..."
+                    CallPhase.DISCONNECTED -> primary.disconnectCauseLabel ?: "Call ended"
                 }
 
                 Text(
@@ -431,7 +431,7 @@ private fun CallScreen(
                 Text(
                     text = primary.displayName,
                     color = Color.White,
-                    fontSize = 34.sp,
+                    fontSize = 32.sp,
                     fontWeight = FontWeight.Bold,
                     letterSpacing = (-0.5).sp,
                     textAlign = TextAlign.Center,
@@ -456,7 +456,8 @@ private fun CallScreen(
                         text = PhoneFormatUtils.formatDisplayNumber(primary.number),
                         color = Color.White.copy(alpha = 0.78f),
                         fontSize = 15.sp,
-                        fontWeight = FontWeight.Medium
+                        fontWeight = FontWeight.Medium,
+                        textAlign = TextAlign.Center
                     )
                 }
 
@@ -525,17 +526,12 @@ private fun CallScreen(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(22.dp))
-
-                if (!showKeypad) {
-                    ContactAvatar(
-                        name = primary.displayName,
-                        photoUri = primary.photoUri,
-                        size = 104.dp
-                    )
-                }
-
                 Spacer(modifier = Modifier.weight(1f))
+
+                if (!showKeypad && !hasPhoto) {
+                    NoPhotoInitialsAvatar(name = primary.displayName)
+                    Spacer(modifier = Modifier.weight(1f))
+                }
 
                 if (primary.phase == CallPhase.RINGING) {
                     Row(
@@ -751,16 +747,21 @@ private fun CallScreen(
                         )
                     }
 
-                    Spacer(modifier = Modifier.height(30.dp))
+                    Spacer(modifier = Modifier.height(24.dp))
+
+                    val endCallLabel = when (primary.phase) {
+                        CallPhase.DIALING, CallPhase.NEW, CallPhase.RINGING -> "Cancel"
+                        else -> "End call"
+                    }
 
                     AppleSolidCallCircle(
                         icon = ApplePhoneIcons.PhoneDownFill,
-                        label = "End",
-                        containerColor = TelviqueColors.CallRed,
+                        label = endCallLabel,
+                        containerColor = Color(0xFFE53935),
                         onClick = { onDisconnect(primary.id) }
                     )
 
-                    Spacer(modifier = Modifier.height(18.dp))
+                    Spacer(modifier = Modifier.height(14.dp))
                 }
             }
         }
@@ -1367,6 +1368,50 @@ private fun SecondaryCallGlassCard(
 }
 
 @Composable
+private fun NoPhotoInitialsAvatar(
+    name: String,
+    modifier: Modifier = Modifier
+) {
+    val words = name.trim().split(' ').filter { it.isNotBlank() }
+    val initials = when {
+        words.size >= 2 -> "${words.first().first().uppercaseChar()}${words.last().first().uppercaseChar()}"
+        words.size == 1 && words.first().first().isLetter() -> words.first().first().uppercaseChar().toString()
+        else -> null
+    }
+
+    Box(
+        modifier = modifier
+            .size(104.dp)
+            .shadow(elevation = 12.dp, shape = CircleShape, clip = false)
+            .clip(CircleShape)
+            .background(Color(0xFF14171F), CircleShape)
+            .border(
+                width = 1.dp,
+                color = Color.White.copy(alpha = 0.16f),
+                shape = CircleShape
+            ),
+        contentAlignment = Alignment.Center
+    ) {
+        if (initials != null) {
+            Text(
+                text = initials,
+                color = Color.White,
+                fontSize = 38.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 1.sp
+            )
+        } else {
+            Icon(
+                imageVector = Icons.Rounded.Person,
+                contentDescription = null,
+                tint = Color.White.copy(alpha = 0.85f),
+                modifier = Modifier.size(52.dp)
+            )
+        }
+    }
+}
+
+@Composable
 private fun AppleInCallControlsGrid(
     primary: CallUiItem,
     hasSecondaryCall: Boolean,
@@ -1398,10 +1443,25 @@ private fun AppleInCallControlsGrid(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(20.dp)
     ) {
+        // Row 1: Mute | Keypad | Speaker
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceEvenly
         ) {
+            LiquidCallControlTile(
+                icon = if (audioState.isMuted) ApplePhoneIcons.MicSlashFill else ApplePhoneIcons.MicFill,
+                label = if (audioState.isMuted) "muted" else "mute",
+                active = audioState.isMuted,
+                backdrop = backdrop,
+                onClick = onToggleMute
+            )
+            LiquidCallControlTile(
+                icon = ApplePhoneIcons.KeypadDots,
+                label = "keypad",
+                active = showKeypad,
+                backdrop = backdrop,
+                onClick = onToggleKeypad
+            )
             LiquidCallControlTile(
                 icon = audioIcon,
                 label = audioLabel,
@@ -1409,23 +1469,9 @@ private fun AppleInCallControlsGrid(
                 backdrop = backdrop,
                 onClick = onAudioClick
             )
-            LiquidCallControlTile(
-                icon = if (primary.phase == CallPhase.HOLDING) ApplePhoneIcons.PlayFill else ApplePhoneIcons.PauseFill,
-                label = if (primary.phase == CallPhase.HOLDING) "resume" else "hold",
-                active = primary.phase == CallPhase.HOLDING,
-                enabled = primary.canHold,
-                backdrop = backdrop,
-                onClick = onToggleHold
-            )
-            LiquidCallControlTile(
-                icon = if (audioState.isMuted) ApplePhoneIcons.MicSlashFill else ApplePhoneIcons.MicFill,
-                label = "mute",
-                active = audioState.isMuted,
-                backdrop = backdrop,
-                onClick = onToggleMute
-            )
         }
 
+        // Row 2: Add call | Hold | Contacts
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceEvenly
@@ -1448,11 +1494,12 @@ private fun AppleInCallControlsGrid(
                 )
             }
             LiquidCallControlTile(
-                icon = ApplePhoneIcons.KeypadDots,
-                label = "keypad",
-                active = showKeypad,
+                icon = if (primary.phase == CallPhase.HOLDING) ApplePhoneIcons.PlayFill else ApplePhoneIcons.PauseFill,
+                label = if (primary.phase == CallPhase.HOLDING) "resume" else "hold",
+                active = primary.phase == CallPhase.HOLDING,
+                enabled = primary.canHold,
                 backdrop = backdrop,
-                onClick = onToggleKeypad
+                onClick = onToggleHold
             )
             if (hasSecondaryCall) {
                 LiquidCallControlTile(
@@ -1485,21 +1532,38 @@ private fun LiquidCallControlTile(
     onClick: () -> Unit
 ) {
     Column(
-        modifier = Modifier.width(84.dp),
+        modifier = Modifier
+            .width(84.dp)
+            .semantics(mergeDescendants = true) {
+                role = Role.Button
+                contentDescription = label
+                stateDescription = if (active) "Active" else if (!enabled) "Disabled" else "Inactive"
+            },
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
+        val specularBorder = Brush.linearGradient(
+            colors = listOf(
+                Color.White.copy(alpha = 0.35f),
+                Color.White.copy(alpha = 0.08f),
+                Color.Transparent
+            ),
+            start = Offset.Zero,
+            end = Offset.Infinite
+        )
+
         val circleModifier = when {
             !enabled -> Modifier
-                .size(72.dp)
+                .size(70.dp)
                 .clip(CircleShape)
                 .background(Color.White.copy(alpha = 0.08f), CircleShape)
+                .border(1.dp, Color.White.copy(alpha = 0.06f), CircleShape)
             active -> Modifier
-                .size(72.dp)
+                .size(70.dp)
                 .clip(CircleShape)
                 .background(Color.White, CircleShape)
                 .liquidBubbleHighlight(isDark = false, cornerFraction = 0.5f)
             else -> Modifier
-                .size(72.dp)
+                .size(70.dp)
                 .backdropLiquidGlass(
                     backdrop = backdrop,
                     shape = CircleShape,
@@ -1509,8 +1573,9 @@ private fun LiquidCallControlTile(
                     hasLens = false,
                     blurScale = 0.75f,
                     scrimAlpha = 0.22f,
-                    fallbackTint = Color.White.copy(alpha = 0.16f)
+                    fallbackTint = Color.White.copy(alpha = 0.18f)
                 )
+                .border(1.dp, specularBorder, CircleShape)
                 .clip(CircleShape)
         }
 
@@ -1520,10 +1585,10 @@ private fun LiquidCallControlTile(
         ) {
             Icon(
                 imageVector = icon,
-                contentDescription = label,
+                contentDescription = null,
                 tint = when {
-                    !enabled -> Color.White.copy(alpha = 0.3f)
-                    active -> Color.Black
+                    !enabled -> Color.White.copy(alpha = 0.30f)
+                    active -> Color(0xFF101217)
                     else -> Color.White
                 },
                 modifier = Modifier.size(28.dp)
@@ -1534,7 +1599,8 @@ private fun LiquidCallControlTile(
             text = label,
             fontSize = 13.sp,
             fontWeight = FontWeight.Normal,
-            color = if (enabled) Color.White else Color.White.copy(alpha = 0.35f)
+            color = if (enabled) Color.White.copy(alpha = 0.90f) else Color.White.copy(alpha = 0.35f),
+            textAlign = TextAlign.Center
         )
     }
 }
@@ -1546,28 +1612,38 @@ private fun AppleSolidCallCircle(
     containerColor: Color,
     onClick: () -> Unit
 ) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+    Column(
+        modifier = Modifier.semantics(mergeDescendants = true) {
+            role = Role.Button
+            contentDescription = label
+        },
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
         Box(
             modifier = Modifier
-                .size(76.dp)
+                .size(74.dp)
+                .shadow(elevation = 8.dp, shape = CircleShape, clip = false)
                 .clip(CircleShape)
                 .background(containerColor, CircleShape)
+                .border(1.dp, Color.White.copy(alpha = 0.20f), CircleShape)
                 .liquidBubbleHighlight(isDark = false, cornerFraction = 0.5f) { 0.75f }
                 .clickable(onClick = onClick),
             contentAlignment = Alignment.Center
         ) {
             Icon(
                 imageVector = icon,
-                contentDescription = label,
+                contentDescription = null,
                 tint = Color.White,
-                modifier = Modifier.size(32.dp)
+                modifier = Modifier.size(30.dp)
             )
         }
-        Spacer(modifier = Modifier.height(7.dp))
+        Spacer(modifier = Modifier.height(6.dp))
         Text(
             text = label,
             fontSize = 13.sp,
-            color = Color.White.copy(alpha = 0.88f)
+            fontWeight = FontWeight.Medium,
+            color = Color.White.copy(alpha = 0.92f),
+            textAlign = TextAlign.Center
         )
     }
 }

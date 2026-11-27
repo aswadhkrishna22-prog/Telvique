@@ -9,11 +9,17 @@ import com.telvique.phone.telecom.CallNotificationHelper
 
 class TelviqueApp : Application() {
 
+    companion object {
+        lateinit var instance: TelviqueApp
+            private set
+    }
+
     lateinit var settingsRepository: SettingsRepository
         private set
 
     override fun onCreate() {
         super.onCreate()
+        instance = this
         settingsRepository = SettingsRepository(this)
         createNotificationChannels()
     }
