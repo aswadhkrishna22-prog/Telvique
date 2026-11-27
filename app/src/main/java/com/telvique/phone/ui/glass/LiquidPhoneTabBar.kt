@@ -3,6 +3,7 @@ package com.telvique.phone.ui.glass
 import android.os.Build
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -99,6 +100,11 @@ data class LiquidPhoneTabItem(
 
 private val LensShape = CircleShape
 
+private object TabBarMotion {
+    const val Damping = 0.82f
+    const val Stiffness = 800f
+}
+
 /**
  * Floating Apple iOS 26 Liquid Glass tab bar ported from OzonePlayer's LiquidNavigationBar.
  * Uses fletchmckee.liquid real-time refraction + draggable water-drop lens on Android 13+,
@@ -137,7 +143,7 @@ fun LiquidPhoneTabBar(
 
     val lift by animateFloatAsState(
         targetValue = if (pressed) 1f else 0f,
-        animationSpec = spring(dampingRatio = 0.90f, stiffness = 520f),
+        animationSpec = spring(dampingRatio = 0.90f, stiffness = 700f),
         label = "liquidDropLift",
     )
     val currentPosition = {
@@ -152,14 +158,14 @@ fun LiquidPhoneTabBar(
             }
             settledPosition.animateTo(
                 visualIndex(selectedIndex, count, isRtl),
-                spring(dampingRatio = 0.8f, stiffness = 400f),
+                spring(dampingRatio = TabBarMotion.Damping, stiffness = TabBarMotion.Stiffness),
             )
         }
     }
 
     LaunchedEffect(count, isRtl) {
         snapshotFlow { currentPosition() }.collectLatest {
-            trailingPosition.animateTo(it, spring(dampingRatio = 0.85f, stiffness = 450f))
+            trailingPosition.animateTo(it, spring(dampingRatio = 0.85f, stiffness = 900f))
         }
     }
 
@@ -167,9 +173,9 @@ fun LiquidPhoneTabBar(
     val activeInk = palette.accentBlue
     val pageColor = palette.background
     val surfaceColor = palette.cardSurface
-    val railTint = if (isDark) Color(0xFF14161C).copy(alpha = 0.36f) else Color.White.copy(alpha = 0.56f)
+    val railTint = if (isDark) Color(0xFF111319).copy(alpha = 0.32f) else Color.White.copy(alpha = 0.30f)
     val railState = if (useRealLiquid) rememberLiquidState() else null
-    val railHeight = 60.dp
+    val railHeight = 58.dp
     val pressedScale = railHeight.value / (railHeight.value - 8f)
     val captionIndex = if (pressed) captionAtPress else selectedIndex
     val activeIndex = captionIndex.coerceIn(0, count - 1)
@@ -177,11 +183,11 @@ fun LiquidPhoneTabBar(
     val animFractions = List(count) { i ->
         animateFloatAsState(
             targetValue = if (activeIndex == i) 1f else 0f,
-            animationSpec = spring(dampingRatio = 0.8f, stiffness = 400f),
+            animationSpec = spring(dampingRatio = TabBarMotion.Damping, stiffness = TabBarMotion.Stiffness),
             label = "tab_expand_$i",
         ).value
     }
-    val weights = animFractions.map { lerp(1.0f, 1.58f, it) }
+    val weights = animFractions.map { lerp(1.0f, 1.85f, it) }
     val totalWeight = weights.sum().coerceAtLeast(1f)
 
     BoxWithConstraints(
@@ -395,12 +401,12 @@ fun LiquidPhoneTabBar(
                             val amount = lift.coerceIn(0f, 1f)
                             shape = LensShape
                             frost = 0.dp
-                            refraction = 0.05f + 0.22f * amount
-                            curve = 0.03f + 0.12f * amount
-                            edge = 0.010f + 0.018f * amount
-                            dispersion = 0.08f * amount
-                            saturation = 1.08f
-                            tint = Color.White.copy(alpha = if (isDark) 0.018f else 0.028f)
+                            refraction = 0.08f + 0.37f * amount
+                            curve = 0.04f + 0.16f * amount
+                            edge = 0.012f + 0.023f * amount
+                            dispersion = 0.14f * amount
+                            saturation = 1.10f
+                            tint = Color.White.copy(alpha = if (isDark) 0.012f else 0.018f)
                         },
                 )
             }
@@ -532,7 +538,7 @@ private fun PhoneNavigationGlyphs(
                             imageVector = if (isSelected) item.activeIcon else item.icon,
                             contentDescription = null,
                             tint = tint,
-                            modifier = Modifier.size(22.dp),
+                            modifier = Modifier.size(24.dp),
                         )
                         if (item.badgeCount > 0 && !captured) {
                             Box(
@@ -559,12 +565,12 @@ private fun PhoneNavigationGlyphs(
                     if (item.label.isNotBlank()) {
                         AnimatedVisibility(
                             visible = isSelected,
-                            enter = fadeIn(animationSpec = tween(150)) + expandHorizontally(
-                                animationSpec = spring(dampingRatio = 0.8f, stiffness = 400f),
+                            enter = fadeIn(animationSpec = tween(120, delayMillis = 40)) + expandHorizontally(
+                                animationSpec = tween(200, easing = FastOutSlowInEasing),
                                 expandFrom = Alignment.Start,
                             ),
-                            exit = fadeOut(animationSpec = tween(100)) + shrinkHorizontally(
-                                animationSpec = spring(dampingRatio = 0.8f, stiffness = 400f),
+                            exit = fadeOut(animationSpec = tween(80)) + shrinkHorizontally(
+                                animationSpec = tween(160),
                                 shrinkTowards = Alignment.Start,
                             ),
                         ) {
@@ -572,7 +578,7 @@ private fun PhoneNavigationGlyphs(
                                 modifier = textSemantics,
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                Spacer(Modifier.width(5.dp))
+                                Spacer(Modifier.width(6.dp))
                                 StaggeredLabelReveal(
                                     text = item.label,
                                     tint = tint,
@@ -650,14 +656,14 @@ private fun Modifier.captureHeadroom(padding: Dp): Modifier = layout { measurabl
     layout(width, height) { placeable.place(-inset, -inset) }
 }
 
-private fun Modifier.navigationRail(state: LiquidState, color: Color, blurRadius: Dp = 8.dp): Modifier =
+private fun Modifier.navigationRail(state: LiquidState, color: Color, blurRadius: Dp = 12.dp): Modifier =
     liquid(state) {
         shape = CircleShape
         frost = blurRadius
-        refraction = 0.05f
-        curve = 0.08f
-        edge = 0.010f
-        saturation = 1.08f
+        refraction = 0.07f
+        curve = 0.12f
+        edge = 0.012f
+        saturation = 1.10f
         dispersion = 0f
         tint = color
     }
