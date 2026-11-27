@@ -2083,6 +2083,105 @@ private fun AppleSlideToAnswerPill(
                             }
                         )
                     }
+                    .pointerInput(maxDragPx, isAnswerTriggered, isDeclineTriggered, callPhase) {
+                        if (isAnswerTriggered || isDeclineTriggered || callPhase != CallPhase.RINGING) return@pointerInput
+
+                        awaitEachGesture {
+                            val down = awaitFirstDown(requireUnconsumed = false)
+                            if (isAnswerTriggered || isDeclineTriggered || callPhase != CallPhase.RINGING) return@awaitEachGesture
+
+                            val thumbSizePx = with(density) { thumbSize.toPx() }
+                            val touchSlop = viewConfiguration.touchSlop
+                            val isTouchOnThumb = down.position.x in 0f..(offsetX.value + thumbSizePx + touchSlop)
+                            if (!isTouchOnThumb) return@awaitEachGesture
+
+                            val startPosition = down.position
+                            val initialKnobOffset = offsetX.value
+                            var isSliding = false
+                            var holdCompleted = false
+
+                            val holdJob = scope.launch {
+                                performHoldTick()
+                                val remainingProgress = (1f - holdProgress.value).coerceAtLeast(0f)
+                                val duration = (SlideToAnswerUtils.DEFAULT_HOLD_DURATION_MS * remainingProgress).toLong().coerceAtLeast(1L)
+                                holdProgress.animateTo(
+                                    targetValue = 1f,
+                                    animationSpec = tween(
+                                        durationMillis = duration.toInt(),
+                                        easing = LinearEasing
+                                    )
+                                )
+                                if (!isAnswerTriggered && !isDeclineTriggered && callPhase == CallPhase.RINGING && !isSliding) {
+                                    holdCompleted = true
+                                    triggerDecline()
+                                }
+                            }
+
+                            try {
+                                while (true) {
+                                    val event = awaitPointerEvent()
+                                    val change = event.changes.firstOrNull { it.id == down.id } ?: break
+
+                                    if (!change.pressed) {
+                                        change.consume()
+                                        break
+                                    }
+
+                                    val deltaX = change.position.x - startPosition.x
+                                    val deltaY = change.position.y - startPosition.y
+                                    val distance = kotlin.math.hypot(deltaX, deltaY)
+
+                                    if (!isSliding) {
+                                        if (SlideToAnswerUtils.shouldCancelHoldForMovement(distance, touchSlop)) {
+                                            isSliding = true
+                                            holdJob.cancel()
+                                            scope.launch {
+                                                holdProgress.animateTo(0f, tween(150))
+                                            }
+                                        }
+                                    }
+
+                                    if (isSliding) {
+                                        change.consume()
+                                        if (!isAnswerTriggered && !isDeclineTriggered && callPhase == CallPhase.RINGING) {
+                                            val newOffset = (initialKnobOffset + deltaX).coerceIn(0f, maxDragPx)
+                                            scope.launch {
+                                                offsetX.snapTo(newOffset)
+                                            }
+                                            if (newOffset >= maxDragPx) {
+                                                triggerAnswer()
+                                                break
+                                            }
+                                        }
+                                    }
+                                }
+                            } finally {
+                                holdJob.cancel()
+
+                                if (!holdCompleted && !isDeclineTriggered) {
+                                    scope.launch {
+                                        holdProgress.animateTo(0f, tween(180))
+                                    }
+                                }
+
+                                if (isSliding && !isAnswerTriggered && !isDeclineTriggered) {
+                                    if (offsetX.value >= completionThreshold) {
+                                        triggerAnswer()
+                                    } else {
+                                        scope.launch {
+                                            offsetX.animateTo(
+                                                targetValue = 0f,
+                                                animationSpec = spring(
+                                                    dampingRatio = 0.70f,
+                                                    stiffness = Spring.StiffnessMediumLow
+                                                )
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
             ) {
                 val textAlpha = SlideToAnswerUtils.calculateTextAlpha(offsetX.value, maxDragPx)
 
@@ -2105,28 +2204,6 @@ private fun AppleSlideToAnswerPill(
                     1f
                 }
 
-                // Soft glow shadow behind knob (green alpha ~0.35, blur ~16dp)
-                Box(
-                    modifier = Modifier
-                        .offset { IntOffset(offsetX.value.roundToInt(), 0) }
-                        .size(thumbSize + 24.dp)
-                        .offset((-12).dp, (-12).dp)
-                        .graphicsLayer {
-                            scaleX = thumbScale
-                            scaleY = thumbScale
-                        }
-                        .background(
-                            Brush.radialGradient(
-                                colors = listOf(
-                                    TelviqueColors.CallGreen.copy(alpha = 0.35f),
-                                    TelviqueColors.CallGreen.copy(alpha = 0.12f),
-                                    Color.Transparent
-                                )
-                            ),
-                            CircleShape
-                        )
-                )
-
                 // Draggable Green Circular Knob with Long-Press-to-Decline & Inner Highlight
                 Box(
                     modifier = Modifier
@@ -2135,6 +2212,23 @@ private fun AppleSlideToAnswerPill(
                         .graphicsLayer {
                             scaleX = thumbScale
                             scaleY = thumbScale
+                        }
+                        .drawBehind {
+                            // Soft glow shadow behind knob (green alpha ~0.35, blur ~16dp)
+                            val glowRadius = (size.minDimension / 2f) + 14.dp.toPx()
+                            drawCircle(
+                                brush = Brush.radialGradient(
+                                    colors = listOf(
+                                        TelviqueColors.CallGreen.copy(alpha = 0.35f),
+                                        TelviqueColors.CallGreen.copy(alpha = 0.12f),
+                                        Color.Transparent
+                                    ),
+                                    center = center,
+                                    radius = glowRadius
+                                ),
+                                radius = glowRadius,
+                                center = center
+                            )
                         }
                         .clip(CircleShape)
                         .background(
@@ -2164,110 +2258,6 @@ private fun AppleSlideToAnswerPill(
                                 radius = size.minDimension / 2f,
                                 center = center
                             )
-                        }
-                        .pointerInput(maxDragPx, isAnswerTriggered, isDeclineTriggered, callPhase) {
-                            if (isAnswerTriggered || isDeclineTriggered || callPhase != CallPhase.RINGING) return@pointerInput
-
-                            awaitEachGesture {
-                                val down = awaitFirstDown(requireUnconsumed = false)
-                                if (isAnswerTriggered || isDeclineTriggered || callPhase != CallPhase.RINGING) return@awaitEachGesture
-
-                                val startPosition = down.position
-                                val touchSlop = viewConfiguration.touchSlop
-                                var isSliding = offsetX.value > touchSlop
-                                var holdCompleted = false
-
-                                val holdJob = if (!isSliding) {
-                                    scope.launch {
-                                        performHoldTick()
-                                        val remainingProgress = (1f - holdProgress.value).coerceAtLeast(0f)
-                                        val duration = (SlideToAnswerUtils.DEFAULT_HOLD_DURATION_MS * remainingProgress).toLong().coerceAtLeast(1L)
-                                        holdProgress.animateTo(
-                                            targetValue = 1f,
-                                            animationSpec = tween(
-                                                durationMillis = duration.toInt(),
-                                                easing = LinearEasing
-                                            )
-                                        )
-                                        if (!isAnswerTriggered && !isDeclineTriggered && callPhase == CallPhase.RINGING && !isSliding) {
-                                            holdCompleted = true
-                                            triggerDecline()
-                                        }
-                                    }
-                                } else null
-
-                                try {
-                                    while (true) {
-                                        val event = awaitPointerEvent()
-                                        val change = event.changes.firstOrNull { it.id == down.id } ?: break
-
-                                        if (change.isConsumed) {
-                                            break
-                                        }
-
-                                        if (!change.pressed) {
-                                            change.consume()
-                                            break
-                                        }
-
-                                        val currentPos = change.position
-                                        val deltaX = currentPos.x - startPosition.x
-                                        val deltaY = currentPos.y - startPosition.y
-                                        val distance = kotlin.math.hypot(deltaX, deltaY)
-
-                                        if (!isSliding) {
-                                            if (SlideToAnswerUtils.shouldCancelHoldForMovement(distance, touchSlop)) {
-                                                isSliding = true
-                                                holdJob?.cancel()
-                                                scope.launch {
-                                                    holdProgress.animateTo(0f, tween(150))
-                                                }
-                                                val initialOffset = deltaX.coerceIn(0f, maxDragPx)
-                                                scope.launch {
-                                                    offsetX.snapTo(initialOffset)
-                                                }
-                                            }
-                                        } else {
-                                            change.consume()
-                                            if (!isAnswerTriggered && !isDeclineTriggered && callPhase == CallPhase.RINGING) {
-                                                val dragDelta = change.positionChange().x
-                                                val newOffset = (offsetX.value + dragDelta).coerceIn(0f, maxDragPx)
-                                                scope.launch {
-                                                    offsetX.snapTo(newOffset)
-                                                }
-                                                if (newOffset >= maxDragPx) {
-                                                    triggerAnswer()
-                                                    break
-                                                }
-                                            }
-                                        }
-                                    }
-                                } finally {
-                                    holdJob?.cancel()
-
-                                    if (!holdCompleted && !isDeclineTriggered) {
-                                        scope.launch {
-                                            holdProgress.animateTo(0f, tween(180))
-                                        }
-                                    }
-
-                                    if (isSliding && !isAnswerTriggered && !isDeclineTriggered) {
-                                        if (offsetX.value >= completionThreshold) {
-                                            triggerAnswer()
-                                        } else {
-                                            scope.launch {
-                                                offsetX.animateTo(
-                                                    targetValue = 0f,
-                                                    animationSpec = spring(
-                                                        dampingRatio = 0.70f,
-                                                        stiffness = Spring.StiffnessMediumLow
-                                                    )
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-                            }
                         },
                     contentAlignment = Alignment.Center
                 ) {
