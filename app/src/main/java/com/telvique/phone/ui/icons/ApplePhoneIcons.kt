@@ -748,4 +748,30 @@ object ApplePhoneIcons {
             }
         }
     }
+
+    /** SF Symbol: recordingtape — classic two-reel voicemail glyph */
+    val Voicemail: ImageVector by lazy {
+        symbol("Voicemail") {
+            path(
+                stroke = FillBrush,
+                strokeLineWidth = 1.8f,
+                strokeLineCap = StrokeCap.Round,
+                strokeLineJoin = StrokeJoin.Round,
+            ) {
+                // Left reel
+                moveTo(10.0f, 11.5f)
+                arcTo(3.5f, 3.5f, 0f, isMoreThanHalf = true, isPositiveArc = true, 3.0f, 11.5f)
+                arcTo(3.5f, 3.5f, 0f, isMoreThanHalf = true, isPositiveArc = true, 10.0f, 11.5f)
+                close()
+                // Right reel
+                moveTo(21.0f, 11.5f)
+                arcTo(3.5f, 3.5f, 0f, isMoreThanHalf = true, isPositiveArc = true, 14.0f, 11.5f)
+                arcTo(3.5f, 3.5f, 0f, isMoreThanHalf = true, isPositiveArc = true, 21.0f, 11.5f)
+                close()
+                // Bottom connecting tangent bar
+                moveTo(6.5f, 15.0f)
+                lineTo(17.5f, 15.0f)
+            }
+        }
+    }
 }

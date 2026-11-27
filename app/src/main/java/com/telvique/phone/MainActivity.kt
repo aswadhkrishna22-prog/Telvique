@@ -419,6 +419,8 @@ private fun TelviqueMainRoot(
                                 UnifiedTab.KEYPAD -> DialerScreen(
                                     input = uiState.dialerInput,
                                     t9Matches = uiState.t9Matches,
+                                    recentCalls = uiState.callLogs,
+                                    blockedNumbers = uiState.settings.blockedNumbers,
                                     lastDialedNumber = uiState.callLogs.firstOrNull { it.number.isNotBlank() }?.number,
                                     dialpadTonesEnabled = uiState.settings.dialpadTonesEnabled,
                                     dialpadVibrateEnabled = uiState.settings.dialpadVibrateEnabled,
@@ -434,7 +436,11 @@ private fun TelviqueMainRoot(
                                     onSetNumber = viewModel::setDialerNumber,
                                     onBackspace = viewModel::backspaceDialDigit,
                                     onClearAll = viewModel::clearDialInput,
-                                    onCallClick = { number, forceSim -> viewModel.callNumber(number, forceSim) }
+                                    onCallClick = { number, forceSim -> viewModel.callNumber(number, forceSim) },
+                                    onToggleFavorite = viewModel::toggleFavorite,
+                                    onToggleBlock = { number, block ->
+                                        if (block) viewModel.blockNumber(number) else viewModel.unblockNumber(number)
+                                    }
                                 )
                             }
                         } else {
@@ -488,6 +494,8 @@ private fun TelviqueMainRoot(
                                 ClassicTab.KEYPAD -> DialerScreen(
                                     input = uiState.dialerInput,
                                     t9Matches = uiState.t9Matches,
+                                    recentCalls = uiState.callLogs,
+                                    blockedNumbers = uiState.settings.blockedNumbers,
                                     lastDialedNumber = uiState.callLogs.firstOrNull { it.number.isNotBlank() }?.number,
                                     dialpadTonesEnabled = uiState.settings.dialpadTonesEnabled,
                                     dialpadVibrateEnabled = uiState.settings.dialpadVibrateEnabled,
@@ -503,7 +511,11 @@ private fun TelviqueMainRoot(
                                     onSetNumber = viewModel::setDialerNumber,
                                     onBackspace = viewModel::backspaceDialDigit,
                                     onClearAll = viewModel::clearDialInput,
-                                    onCallClick = { number, forceSim -> viewModel.callNumber(number, forceSim) }
+                                    onCallClick = { number, forceSim -> viewModel.callNumber(number, forceSim) },
+                                    onToggleFavorite = viewModel::toggleFavorite,
+                                    onToggleBlock = { number, block ->
+                                        if (block) viewModel.blockNumber(number) else viewModel.unblockNumber(number)
+                                    }
                                 )
 
                                 ClassicTab.SETTINGS -> SettingsScreen(

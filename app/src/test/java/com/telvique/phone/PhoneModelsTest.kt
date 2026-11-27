@@ -55,6 +55,20 @@ class PhoneModelsTest {
     }
 
     @Test
+    fun t9Matcher_ranksByMatchQualityAndFindsDigitRanges() {
+        val exact = ContactItem(1L, "k1", "Zoe", listOf(PhoneNumberEntry("98765", "Mobile")), null, false)
+        val prefix = ContactItem(2L, "k2", "Bob", listOf(PhoneNumberEntry("+91 98765 43210", "Mobile")), null, false)
+        val substring = ContactItem(3L, "k3", "Carl", listOf(PhoneNumberEntry("555-98765", "Home")), null, false)
+
+        val ranked = T9Matcher.rankMatches(listOf(substring, prefix, exact), "98765")
+        assertEquals(listOf(1L, 2L, 3L), ranked.map { it.contact.id })
+
+        // Highlight ranges skip formatting space inside "+91 98765 43210"
+        val ranges = T9Matcher.findMatchedDigitCharRanges("+91 98765 43210", "87654")
+        assertEquals(listOf(5..8, 10..10), ranges)
+    }
+
+    @Test
     fun isSuspectedTelemarketer_detectsIndian140And160Series() {
         assertTrue(PhoneFormatUtils.isSuspectedTelemarketer("+91 140 812 3456"))
         assertTrue(PhoneFormatUtils.isSuspectedTelemarketer("1600123456"))
