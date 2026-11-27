@@ -18,7 +18,8 @@ data class ContactItem(
     val name: String,
     val numbers: List<PhoneNumberEntry>,
     val photoUri: String?,
-    val isStarred: Boolean
+    val isStarred: Boolean,
+    val photoFullUri: String? = null
 ) {
     val primaryNumber: String get() = numbers.firstOrNull()?.number.orEmpty()
 }
@@ -41,7 +42,8 @@ data class CallLogItem(
     val timestamp: Long,
     val durationSeconds: Long,
     val simLabel: String?,
-    val photoUri: String?
+    val photoUri: String?,
+    val photoFullUri: String? = null
 ) {
     val displayTitle: String
         get() = cachedName?.takeIf { it.isNotBlank() } ?: number.ifBlank { "Private Number" }

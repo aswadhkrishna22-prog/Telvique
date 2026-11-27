@@ -49,7 +49,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -65,6 +68,7 @@ import com.telvique.phone.data.GroupedCallLogItem
 import com.telvique.phone.data.PhoneFormatUtils
 import com.telvique.phone.data.PhoneLayoutMode
 import com.telvique.phone.data.RecentsFilter
+import com.telvique.phone.data.SimAccountInfo
 import com.telvique.phone.data.groupConsecutiveCallLogs
 import com.telvique.phone.telecom.CallManager
 import com.telvique.phone.ui.components.AppleLargeHeader
@@ -96,6 +100,9 @@ fun RecentsScreen(
     onDeleteEntries: (List<Long>) -> Unit,
     onClearAll: () -> Unit,
     onToggleBlock: (String, Boolean) -> Unit,
+    simAccounts: List<SimAccountInfo> = emptyList(),
+    onAddFavorite: () -> Unit = {},
+    onOpenSearch: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val palette = LocalApplePalette.current
@@ -235,7 +242,7 @@ fun RecentsScreen(
             // Unified mode pins Favorites strip at the top of Calls
             if (isUnified && favorites.isNotEmpty()) {
                 item(key = "unified_favorites") {
-                    Column(modifier = Modifier.padding(top = 4.dp, bottom = 10.dp)) {
+                    Column(modifier = Modifier.padding(top = 4.dp, bottom = 6.dp)) {
                         Text(
                             text = "Favorites",
                             color = palette.secondaryLabel,
@@ -245,37 +252,45 @@ fun RecentsScreen(
                         )
                         LazyRow(
                             contentPadding = PaddingValues(horizontal = 16.dp),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            horizontalArrangement = Arrangement.spacedBy(14.dp)
                         ) {
-                            items(favorites, key = { "ufav_${it.id}" }) { fav ->
+                            item(key = "fav_add_item") {
+                                val stroke = remember(palette.tertiaryLabel) {
+                                    Stroke(
+                                        width = 2f,
+                                        pathEffect = PathEffect.dashPathEffect(floatArrayOf(12f, 10f), 0f)
+                                    )
+                                }
+                                val tertiaryColor = palette.tertiaryLabel
                                 Column(
                                     modifier = Modifier
-                                        .width(86.dp)
-                                        .clearLiquidGlassPill(
-                                            shape = RoundedCornerShape(20.dp),
-                                            hazeState = null,
-                                            isDark = palette.isDark,
-                                            blurRadius = 8.dp,
-                                            shadowElevation = 3.dp,
-                                        )
-                                        .clickable {
-                                            if (fav.primaryNumber.isNotBlank()) {
-                                                onCallNumber(fav.primaryNumber)
-                                            }
-                                        }
-                                        .padding(horizontal = 8.dp, vertical = 10.dp),
+                                        .width(68.dp)
+                                        .clickable(onClick = onAddFavorite),
                                     horizontalAlignment = Alignment.CenterHorizontally
                                 ) {
-                                    ContactAvatar(
-                                        name = fav.name,
-                                        photoUri = fav.photoUri,
-                                        size = 48.dp
-                                    )
+                                    Box(
+                                        modifier = Modifier
+                                            .size(64.dp)
+                                            .drawBehind {
+                                                drawCircle(
+                                                    color = tertiaryColor,
+                                                    style = stroke
+                                                )
+                                            },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = ApplePhoneIcons.Plus,
+                                            contentDescription = "Add Favorite",
+                                            tint = palette.secondaryLabel,
+                                            modifier = Modifier.size(24.dp)
+                                        )
+                                    }
                                     Spacer(modifier = Modifier.height(6.dp))
                                     Text(
-                                        text = fav.name.substringBefore(' '),
+                                        text = "Add",
                                         color = palette.label,
-                                        fontSize = 12.sp,
+                                        fontSize = 13.sp,
                                         fontWeight = FontWeight.Medium,
                                         textAlign = TextAlign.Center,
                                         maxLines = 1,
@@ -283,6 +298,71 @@ fun RecentsScreen(
                                     )
                                 }
                             }
+
+                            items(favorites, key = { "ufav_${it.id}" }) { fav ->
+                                Column(
+                                    modifier = Modifier
+                                        .width(68.dp)
+                                        .clickable {
+                                            if (fav.primaryNumber.isNotBlank()) {
+                                                onCallNumber(fav.primaryNumber)
+                                            }
+                                        },
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    ContactAvatar(
+                                        name = fav.name,
+                                        photoUri = fav.photoUri,
+                                        size = 64.dp,
+                                        photoUriLarge = fav.photoFullUri
+                                    )
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Text(
+                                        text = fav.name.trim().substringBefore(' '),
+                                        color = palette.label,
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        textAlign = TextAlign.Center,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // In-page search field (Unified mode)
+            if (isUnified) {
+                item(key = "unified_inpage_search") {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 6.dp)
+                            .height(38.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(palette.secondaryFill)
+                            .clickable(onClick = onOpenSearch)
+                            .padding(horizontal = 12.dp),
+                        contentAlignment = Alignment.CenterStart
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                imageVector = ApplePhoneIcons.MagnifyingGlass,
+                                contentDescription = "Search",
+                                tint = palette.secondaryLabel,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text(
+                                text = "Search",
+                                color = palette.secondaryLabel,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Normal
+                            )
                         }
                     }
                 }
@@ -348,6 +428,7 @@ fun RecentsScreen(
                             item = item,
                             count = group.count,
                             showDivider = index < groupedLogs.lastIndex,
+                            showSimLabel = simAccounts.size > 1,
                             onRowClick = {
                                 if (item.number.isNotBlank()) onCallNumber(item.number)
                             },
@@ -392,6 +473,7 @@ fun RecentsScreen(
                 ContactAvatar(
                     name = effectiveTitle,
                     photoUri = activeItem.photoUri,
+                    photoUriLarge = activeItem.photoFullUri,
                     size = 76.dp
                 )
                 Spacer(modifier = Modifier.height(10.dp))
@@ -681,11 +763,13 @@ private fun AppleRecentCallRow(
     item: CallLogItem,
     count: Int,
     showDivider: Boolean,
+    showSimLabel: Boolean = false,
     onRowClick: () -> Unit,
     onInfoClick: () -> Unit
 ) {
     val palette = LocalApplePalette.current
     val isMissed = item.type == CallLogType.MISSED || item.type == CallLogType.REJECTED
+    val isBlocked = item.type == CallLogType.BLOCKED
     val cnapName = if (item.cachedName.isNullOrBlank()) {
         CallManager.lookupCachedCnapName(item.number)
     } else null
@@ -698,6 +782,39 @@ private fun AppleRecentCallRow(
     val baseTitle = cnapName ?: fallbackTitle
     val titleWithCount = if (count > 1) "$baseTitle ($count)" else baseTitle
 
+    val dirIcon: ImageVector? = when {
+        isSpam || cnapName != null -> null
+        item.type == CallLogType.OUTGOING -> ApplePhoneIcons.PhoneArrowUpRight
+        item.type == CallLogType.INCOMING -> ApplePhoneIcons.PhoneArrowDownLeft
+        item.type == CallLogType.MISSED -> ApplePhoneIcons.PhoneArrowDownLeft
+        item.type == CallLogType.REJECTED -> ApplePhoneIcons.PhoneArrowDownLeft
+        item.type == CallLogType.BLOCKED -> Icons.Rounded.Block
+        else -> null
+    }
+
+    val isCallRedSubtitle = isMissed || isBlocked
+    val iconTint = if (isCallRedSubtitle) palette.callRed else palette.secondaryLabel
+    val subtitleColor = if (isCallRedSubtitle) palette.callRed else palette.secondaryLabel
+
+    val typeWord = when {
+        isSpam -> "Telemarketer"
+        cnapName != null -> "Carrier ID"
+        item.type == CallLogType.INCOMING -> "Incoming"
+        item.type == CallLogType.OUTGOING -> "Outgoing"
+        item.type == CallLogType.MISSED -> "Missed"
+        item.type == CallLogType.REJECTED -> "Declined"
+        item.type == CallLogType.BLOCKED -> "Blocked"
+        item.type == CallLogType.VOICEMAIL -> "Voicemail"
+        else -> ""
+    }
+
+    val subtitleParts = buildList {
+        if (typeWord.isNotBlank()) add(typeWord)
+        if (showSimLabel && !item.simLabel.isNullOrBlank()) add(item.simLabel)
+        if (item.durationSeconds > 0L) add(PhoneFormatUtils.formatDuration(item.durationSeconds))
+    }
+    val subtitleText = subtitleParts.joinToString(" • ")
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -707,37 +824,14 @@ private fun AppleRecentCallRow(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = 14.dp, end = 10.dp, top = 10.dp, bottom = 10.dp),
+                .padding(start = 16.dp, end = 10.dp, top = 10.dp, bottom = 10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Left outgoing/incoming icon column (matches authentic iOS Recents indentation)
-            Box(
-                modifier = Modifier.width(24.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                when (item.type) {
-                    CallLogType.OUTGOING -> Icon(
-                        imageVector = ApplePhoneIcons.PhoneArrowUpRight,
-                        contentDescription = "Outgoing",
-                        tint = palette.tertiaryLabel,
-                        modifier = Modifier.size(14.dp)
-                    )
-                    CallLogType.INCOMING -> Icon(
-                        imageVector = ApplePhoneIcons.PhoneArrowDownLeft,
-                        contentDescription = "Incoming",
-                        tint = palette.tertiaryLabel,
-                        modifier = Modifier.size(14.dp)
-                    )
-                    else -> Unit
-                }
-            }
-
-            Spacer(modifier = Modifier.width(6.dp))
-
             ContactAvatar(
                 name = item.displayTitle,
                 photoUri = item.photoUri,
-                size = 38.dp
+                size = 38.dp,
+                photoUriLarge = item.photoFullUri
             )
 
             Spacer(modifier = Modifier.width(12.dp))
@@ -745,33 +839,38 @@ private fun AppleRecentCallRow(
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = titleWithCount,
-                    color = if (isMissed || isSpam) palette.callRed else palette.label,
+                    color = if (isMissed || isSpam || isBlocked) palette.callRed else palette.label,
                     fontSize = 16.sp,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
                 Spacer(modifier = Modifier.height(1.dp))
-                val meta = buildList {
-                    when {
-                        isSpam -> add("Telemarketer")
-                        cnapName != null -> add("Carrier ID")
-                        item.type == CallLogType.MISSED -> add("Missed")
-                        item.type == CallLogType.REJECTED -> add("Declined")
-                        item.type == CallLogType.BLOCKED -> add("Blocked")
-                        else -> add("mobile")
+                if (dirIcon != null || subtitleText.isNotEmpty()) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        if (dirIcon != null) {
+                            Icon(
+                                imageVector = dirIcon,
+                                contentDescription = null,
+                                tint = iconTint,
+                                modifier = Modifier.size(12.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                        }
+                        if (subtitleText.isNotEmpty()) {
+                            Text(
+                                text = subtitleText,
+                                color = subtitleColor,
+                                fontSize = 13.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
                     }
-                    if (!item.simLabel.isNullOrBlank()) add(item.simLabel)
-                    if (item.durationSeconds > 0L) add(PhoneFormatUtils.formatDuration(item.durationSeconds))
-                }.joinToString(" • ")
-
-                Text(
-                    text = meta,
-                    color = palette.secondaryLabel,
-                    fontSize = 13.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+                }
             }
 
             Spacer(modifier = Modifier.width(8.dp))
@@ -798,7 +897,7 @@ private fun AppleRecentCallRow(
 
         if (showDivider) {
             HorizontalDivider(
-                modifier = Modifier.padding(start = 94.dp),
+                modifier = Modifier.padding(start = 66.dp),
                 thickness = 0.5.dp,
                 color = palette.separator.copy(alpha = 0.5f)
             )

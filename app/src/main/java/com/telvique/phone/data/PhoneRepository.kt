@@ -86,6 +86,7 @@ class PhoneRepository(private val context: Context) {
             ContactsContract.CommonDataKinds.Phone.TYPE,
             ContactsContract.CommonDataKinds.Phone.LABEL,
             ContactsContract.CommonDataKinds.Phone.PHOTO_THUMBNAIL_URI,
+            ContactsContract.CommonDataKinds.Phone.PHOTO_URI,
             ContactsContract.CommonDataKinds.Phone.STARRED
         )
 
@@ -103,6 +104,7 @@ class PhoneRepository(private val context: Context) {
             val typeIdx = cursor.getColumnIndexOrThrow(ContactsContract.CommonDataKinds.Phone.TYPE)
             val labelIdx = cursor.getColumnIndexOrThrow(ContactsContract.CommonDataKinds.Phone.LABEL)
             val photoIdx = cursor.getColumnIndexOrThrow(ContactsContract.CommonDataKinds.Phone.PHOTO_THUMBNAIL_URI)
+            val fullPhotoIdx = cursor.getColumnIndexOrThrow(ContactsContract.CommonDataKinds.Phone.PHOTO_URI)
             val starredIdx = cursor.getColumnIndexOrThrow(ContactsContract.CommonDataKinds.Phone.STARRED)
 
             while (cursor.moveToNext()) {
@@ -116,10 +118,11 @@ class PhoneRepository(private val context: Context) {
                     .getTypeLabel(context.resources, type, customLabel)
                     .toString()
                 val photoUri = cursor.getString(photoIdx)
+                val photoFullUri = cursor.getString(fullPhotoIdx)
                 val isStarred = cursor.getInt(starredIdx) == 1
 
                 val builder = contactMap.getOrPut(id) {
-                    MutableContactBuilder(id, lookup, name, photoUri, isStarred)
+                    MutableContactBuilder(id, lookup, name, photoUri, isStarred, photoFullUri)
                 }
                 val normalized = PhoneFormatUtils.normalizeDigits(number)
                 if (builder.numbers.none { PhoneFormatUtils.normalizeDigits(it.number) == normalized }) {
@@ -370,6 +373,7 @@ class PhoneRepository(private val context: Context) {
         val name: String,
         val photoUri: String?,
         val isStarred: Boolean,
+        val photoFullUri: String? = null,
         val numbers: MutableList<PhoneNumberEntry> = mutableListOf()
     ) {
         fun build() = ContactItem(
@@ -378,7 +382,8 @@ class PhoneRepository(private val context: Context) {
             name = name,
             numbers = numbers.toList(),
             photoUri = photoUri,
-            isStarred = isStarred
+            isStarred = isStarred,
+            photoFullUri = photoFullUri
         )
     }
 }
