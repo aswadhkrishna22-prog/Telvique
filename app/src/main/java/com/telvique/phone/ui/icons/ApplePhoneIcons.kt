@@ -514,6 +514,95 @@ object ApplePhoneIcons {
         }
     }
 
+    /** SF Symbol: message (outline) — Apple thin rounded message speech bubble */
+    val MessageOutline: ImageVector by lazy {
+        symbol("MessageOutline") {
+            path(
+                stroke = FillBrush,
+                strokeLineWidth = 1.75f,
+                strokeLineCap = StrokeCap.Round,
+                strokeLineJoin = StrokeJoin.Round,
+            ) {
+                moveTo(12f, 3.8f)
+                curveTo(6.8f, 3.8f, 2.6f, 7.3f, 2.6f, 11.6f)
+                curveTo(2.6f, 13.85f, 3.75f, 15.85f, 5.55f, 17.25f)
+                curveTo(5.62f, 17.3f, 5.66f, 17.4f, 5.62f, 17.5f)
+                lineTo(4.75f, 20.35f)
+                curveTo(4.68f, 20.6f, 4.95f, 20.82f, 5.18f, 20.7f)
+                lineTo(8.85f, 18.95f)
+                curveTo(8.95f, 18.9f, 9.05f, 18.92f, 9.15f, 18.95f)
+                curveTo(10.05f, 19.25f, 11.0f, 19.4f, 12f, 19.4f)
+                curveTo(17.2f, 19.4f, 21.4f, 15.9f, 21.4f, 11.6f)
+                curveTo(21.4f, 7.3f, 17.2f, 3.8f, 12f, 3.8f)
+                close()
+            }
+        }
+    }
+
+    /** SF Symbol: speaker.slash (outline) — Apple thin rounded silence / mute ringer */
+    val SpeakerSlashOutline: ImageVector by lazy {
+        symbol("SpeakerSlashOutline") {
+            // Speaker body outline
+            path(
+                stroke = FillBrush,
+                strokeLineWidth = 1.75f,
+                strokeLineCap = StrokeCap.Round,
+                strokeLineJoin = StrokeJoin.Round,
+            ) {
+                moveTo(9.8f, 7.5f)
+                lineTo(12.5f, 5.1f)
+                curveTo(13.1f, 4.6f, 14.0f, 5.0f, 14.0f, 5.8f)
+                verticalLineTo(11.5f)
+                moveTo(14.0f, 15.5f)
+                verticalLineTo(18.2f)
+                curveTo(14.0f, 19.0f, 13.1f, 19.4f, 12.5f, 18.9f)
+                lineTo(7.5f, 14.8f)
+                horizontalLineTo(4.2f)
+                curveTo(3.55f, 14.8f, 3.0f, 14.25f, 3.0f, 13.6f)
+                verticalLineTo(10.4f)
+                curveTo(3.0f, 9.75f, 3.55f, 9.2f, 4.2f, 9.2f)
+                horizontalLineTo(7.5f)
+            }
+            // Diagonal slash
+            path(
+                stroke = FillBrush,
+                strokeLineWidth = 1.75f,
+                strokeLineCap = StrokeCap.Round,
+            ) {
+                moveTo(3.5f, 3.5f)
+                lineTo(20.5f, 20.5f)
+            }
+        }
+    }
+
+    /** SF Symbol: phone (thin rounded) — thin handset with rounded corners */
+    val PhoneThinRounded: ImageVector by lazy {
+        symbol("PhoneThinRounded") {
+            path(
+                stroke = FillBrush,
+                strokeLineWidth = 1.80f,
+                strokeLineCap = StrokeCap.Round,
+                strokeLineJoin = StrokeJoin.Round,
+            ) {
+                moveTo(6.62f, 10.79f)
+                curveTo(8.06f, 13.62f, 10.38f, 15.94f, 13.21f, 17.38f)
+                lineTo(15.41f, 15.18f)
+                curveTo(15.68f, 14.91f, 16.08f, 14.82f, 16.43f, 14.93f)
+                curveTo(17.55f, 15.30f, 18.75f, 15.50f, 20.0f, 15.50f)
+                curveTo(20.55f, 15.50f, 21.0f, 15.95f, 21.0f, 16.50f)
+                verticalLineTo(19.8f)
+                curveTo(21.0f, 20.45f, 20.45f, 21.0f, 19.8f, 21.0f)
+                curveTo(10.61f, 21.0f, 3.0f, 13.39f, 3.0f, 4.2f)
+                curveTo(3.0f, 3.55f, 3.55f, 3.0f, 4.2f, 3.0f)
+                horizontalLineTo(7.40f)
+                curveTo(8.05f, 3.0f, 8.50f, 3.45f, 8.50f, 4.1f)
+                curveTo(8.50f, 5.25f, 8.70f, 6.45f, 9.07f, 7.57f)
+                curveTo(9.18f, 7.92f, 9.09f, 8.31f, 8.82f, 8.59f)
+                close()
+            }
+        }
+    }
+
     /** SF Symbol: plus */
     val Plus: ImageVector by lazy {
         symbol("Plus") {
