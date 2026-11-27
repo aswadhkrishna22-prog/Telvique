@@ -12,6 +12,7 @@ import com.telvique.phone.TelviqueApp
 import com.telvique.phone.data.CallLogItem
 import com.telvique.phone.data.CallLogType
 import com.telvique.phone.data.ContactItem
+import com.telvique.phone.data.PhoneFormatUtils
 import com.telvique.phone.data.PhoneLayoutMode
 import com.telvique.phone.data.PhoneRepository
 import com.telvique.phone.data.RecentsFilter
@@ -109,7 +110,30 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         recentsFilter,
         recentsQuery
     ) { input, contacts, logs, filter, rQuery ->
-        CoreListsState(input, contacts, logs, filter, rQuery)
+        val contactByTail = buildMap {
+            for (contact in contacts) {
+                for (numEntry in contact.numbers) {
+                    val tail = PhoneFormatUtils.comparableTail(numEntry.number)
+                    if (tail.isNotEmpty()) {
+                        put(tail, contact)
+                    }
+                }
+            }
+        }
+        val enrichedLogs = logs.map { log ->
+            val logTail = PhoneFormatUtils.comparableTail(log.number)
+            val matchedContact = if (logTail.isNotEmpty()) contactByTail[logTail] else null
+            if (matchedContact != null) {
+                log.copy(
+                    cachedName = matchedContact.name,
+                    photoUri = matchedContact.photoUri ?: log.photoUri,
+                    photoFullUri = matchedContact.photoFullUri ?: log.photoFullUri
+                )
+            } else {
+                log
+            }
+        }
+        CoreListsState(input, contacts, enrichedLogs, filter, rQuery)
     }
 
     private data class AuxiliaryState(

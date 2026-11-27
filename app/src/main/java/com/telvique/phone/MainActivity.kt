@@ -18,6 +18,8 @@ import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -43,6 +45,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -50,7 +53,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
@@ -264,6 +271,55 @@ private fun TelviqueMainRoot(
     val bottomBarReservedHeight = navBarBottomDp + 86.dp
     val isUnified = uiState.settings.layoutMode == PhoneLayoutMode.UNIFIED
 
+    val hideThresholdPx = with(LocalDensity.current) { 24.dp.toPx() }
+    val showThresholdPx = with(LocalDensity.current) { 12.dp.toPx() }
+    var scrollAccumulator by remember { mutableFloatStateOf(0f) }
+    var barVisible by rememberSaveable { mutableStateOf(true) }
+
+    val isKeypadActive = (isUnified && unifiedTab == UnifiedTab.KEYPAD) ||
+        (!isUnified && classicTab == ClassicTab.KEYPAD)
+    if (isKeypadActive && !barVisible) {
+        barVisible = true
+        scrollAccumulator = 0f
+    }
+
+    LaunchedEffect(unifiedTab, classicTab) {
+        barVisible = true
+        scrollAccumulator = 0f
+    }
+
+    LaunchedEffect(showUnifiedSettings, showUnifiedSearch) {
+        if (!showUnifiedSettings && !showUnifiedSearch) {
+            barVisible = true
+            scrollAccumulator = 0f
+        }
+    }
+
+    val nestedScrollConnection = remember(isKeypadActive, hideThresholdPx, showThresholdPx) {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                if (isKeypadActive) return Offset.Zero
+                val dy = available.y
+                if (dy < 0f) {
+                    if (scrollAccumulator > 0f) scrollAccumulator = 0f
+                    scrollAccumulator += dy
+                    if (scrollAccumulator <= -hideThresholdPx) {
+                        barVisible = false
+                        scrollAccumulator = 0f
+                    }
+                } else if (dy > 0f) {
+                    if (scrollAccumulator < 0f) scrollAccumulator = 0f
+                    scrollAccumulator += dy
+                    if (scrollAccumulator >= showThresholdPx) {
+                        barVisible = true
+                        scrollAccumulator = 0f
+                    }
+                }
+                return Offset.Zero
+            }
+        }
+    }
+
     LaunchedEffect(isUnified, unifiedTab, classicTab, missedCallCount) {
         val viewingRecents = (isUnified && unifiedTab == UnifiedTab.CALLS) ||
             (!isUnified && classicTab == ClassicTab.RECENTS)
@@ -285,6 +341,7 @@ private fun TelviqueMainRoot(
             modifier = Modifier
                 .fillMaxSize()
                 .background(appBackground)
+                .nestedScroll(nestedScrollConnection)
                 .then(if (navLiquidState != null) Modifier.liquefiable(navLiquidState) else Modifier)
         ) {
                 Column(modifier = Modifier.fillMaxSize()) {
@@ -336,6 +393,7 @@ private fun TelviqueMainRoot(
                                     selectedFilter = uiState.recentsFilter,
                                     blockedNumbers = uiState.settings.blockedNumbers,
                                     bottomInsetPadding = bottomBarReservedHeight,
+                                    simAccounts = uiState.simAccounts,
                                     onFilterChange = viewModel::setRecentsFilter,
                                     onLayoutModeChange = viewModel::setLayoutMode,
                                     onOpenSettings = { showUnifiedSettings = true },
@@ -344,7 +402,9 @@ private fun TelviqueMainRoot(
                                     onClearAll = viewModel::clearCallLogs,
                                     onToggleBlock = { number, block ->
                                         if (block) viewModel.blockNumber(number) else viewModel.unblockNumber(number)
-                                    }
+                                    },
+                                    onAddFavorite = { unifiedTab = UnifiedTab.CONTACTS },
+                                    onOpenSearch = { showUnifiedSearch = true }
                                 )
 
                                 UnifiedTab.CONTACTS -> ContactsScreen(
@@ -410,6 +470,7 @@ private fun TelviqueMainRoot(
                                     selectedFilter = uiState.recentsFilter,
                                     blockedNumbers = uiState.settings.blockedNumbers,
                                     bottomInsetPadding = bottomBarReservedHeight,
+                                    simAccounts = uiState.simAccounts,
                                     onFilterChange = viewModel::setRecentsFilter,
                                     onLayoutModeChange = viewModel::setLayoutMode,
                                     onOpenSettings = { classicTab = ClassicTab.SETTINGS },
@@ -485,13 +546,24 @@ private fun TelviqueMainRoot(
             }
 
             // Floating iOS 26 Liquid Glass Bottom Navigation Bar (sibling to content plane!)
-            if (!showUnifiedSettings && !showUnifiedSearch) {
+            AnimatedVisibility(
+                visible = barVisible && !showUnifiedSettings && !showUnifiedSearch,
+                enter = slideInVertically(
+                    animationSpec = tween(durationMillis = 220),
+                    initialOffsetY = { it }
+                ) + fadeIn(animationSpec = tween(durationMillis = 220)),
+                exit = slideOutVertically(
+                    animationSpec = tween(durationMillis = 220),
+                    targetOffsetY = { it }
+                ) + fadeOut(animationSpec = tween(durationMillis = 220)),
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+                    .padding(horizontal = 16.dp, vertical = 12.dp)
+            ) {
                 Row(
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .fillMaxWidth()
-                        .navigationBarsPadding()
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.Center,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -516,19 +588,8 @@ private fun TelviqueMainRoot(
                                 unifiedTab = UnifiedTab.entries.getOrElse(idx) { UnifiedTab.KEYPAD }
                             },
                             isDark = palette.isDark,
-                            maxWidthDp = 282.dp,
+                            maxWidthDp = 340.dp,
                             modifier = Modifier.weight(1f, fill = false)
-                        )
-                        Spacer(modifier = Modifier.width(12.dp))
-                        LiquidCircularGlassButton(
-                            icon = ApplePhoneIcons.MagnifyingGlass,
-                            contentDescription = "Search",
-                            onClick = { showUnifiedSearch = true },
-                            size = 60.dp,
-                            iconSize = 22.dp,
-                            tint = palette.label,
-                            isDark = palette.isDark,
-                            liquidState = navLiquidState,
                         )
                     } else {
                         val classicItems = remember(missedCallCount) {

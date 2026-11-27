@@ -74,14 +74,21 @@ fun ContactAvatar(
     name: String,
     photoUri: String?,
     size: Dp = 44.dp,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    photoUriLarge: String? = null
 ) {
-    val (topColor, bottomColor) = posterColorsForName(name)
+    val (topColor, bottomColor) = AppleAvatarGradients[0]
     val words = name.trim().split(' ').filter { it.isNotBlank() }
     val initials = when {
         words.size >= 2 -> "${words.first().first().uppercaseChar()}${words.last().first().uppercaseChar()}"
         words.size == 1 && words.first().first().isLetter() -> words.first().first().uppercaseChar().toString()
         else -> null
+    }
+
+    val effectivePhotoUri = if (size >= 56.dp) {
+        photoUriLarge?.takeIf { it.isNotBlank() } ?: photoUri
+    } else {
+        photoUri
     }
 
     Box(
@@ -91,9 +98,9 @@ fun ContactAvatar(
             .background(Brush.verticalGradient(listOf(topColor, bottomColor))),
         contentAlignment = Alignment.Center
     ) {
-        if (!photoUri.isNullOrBlank()) {
+        if (!effectivePhotoUri.isNullOrBlank()) {
             AsyncImage(
-                model = photoUri,
+                model = effectivePhotoUri,
                 contentDescription = name,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize()

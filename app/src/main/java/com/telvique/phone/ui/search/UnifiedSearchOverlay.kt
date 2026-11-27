@@ -24,16 +24,19 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.delay
 import com.telvique.phone.data.CallLogItem
 import com.telvique.phone.data.ContactItem
 import com.telvique.phone.data.PhoneFormatUtils
@@ -55,6 +58,12 @@ fun UnifiedSearchOverlay(
 ) {
     val palette = LocalApplePalette.current
     var query by remember { mutableStateOf("") }
+    val focusRequester = remember { FocusRequester() }
+
+    LaunchedEffect(Unit) {
+        delay(100)
+        focusRequester.requestFocus()
+    }
 
     val matchingContacts = remember(contacts, query) {
         val trimmed = query.trim()
@@ -87,6 +96,7 @@ fun UnifiedSearchOverlay(
                 query = query,
                 placeholder = "Contacts, numbers & calls",
                 onQueryChange = { query = it },
+                focusRequester = focusRequester,
                 modifier = Modifier.weight(1f)
             )
             Text(
@@ -131,7 +141,12 @@ fun UnifiedSearchOverlay(
                                 .padding(horizontal = 20.dp, vertical = 10.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            ContactAvatar(name = contact.name, photoUri = contact.photoUri, size = 38.dp)
+                            ContactAvatar(
+                                name = contact.name,
+                                photoUri = contact.photoUri,
+                                photoUriLarge = contact.photoFullUri,
+                                size = 38.dp
+                            )
                             Spacer(modifier = Modifier.width(12.dp))
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
@@ -194,7 +209,12 @@ fun UnifiedSearchOverlay(
                                 .padding(horizontal = 20.dp, vertical = 10.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            ContactAvatar(name = log.displayTitle, photoUri = log.photoUri, size = 36.dp)
+                            ContactAvatar(
+                                name = log.displayTitle,
+                                photoUri = log.photoUri,
+                                photoUriLarge = log.photoFullUri,
+                                size = 36.dp
+                            )
                             Spacer(modifier = Modifier.width(12.dp))
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(

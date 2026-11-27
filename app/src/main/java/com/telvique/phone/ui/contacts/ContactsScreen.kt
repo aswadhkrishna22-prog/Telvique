@@ -43,6 +43,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -344,7 +346,8 @@ fun AppleSearchField(
     query: String,
     placeholder: String,
     onQueryChange: (String) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    focusRequester: FocusRequester? = null
 ) {
     val palette = LocalApplePalette.current
 
@@ -388,7 +391,9 @@ fun AppleSearchField(
                     fontSize = 16.sp
                 ),
                 cursorBrush = SolidColor(palette.accentBlue),
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
             )
         }
         if (query.isNotEmpty()) {
@@ -451,6 +456,7 @@ fun AppleContactDetailSheet(
                     ContactAvatar(
                         name = contact.name,
                         photoUri = contact.photoUri,
+                        photoUriLarge = contact.photoFullUri,
                         size = 86.dp
                     )
                     Spacer(modifier = Modifier.height(10.dp))
