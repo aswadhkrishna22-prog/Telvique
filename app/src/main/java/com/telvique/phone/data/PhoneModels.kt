@@ -331,7 +331,7 @@ object T9Matcher {
 
 object SlideToAnswerUtils {
     const val DEFAULT_HOLD_DURATION_MS = 1000L
-    const val COMPLETION_THRESHOLD_RATIO = 0.72f
+    const val COMPLETION_THRESHOLD_RATIO = 0.80f
 
     fun calculateProgress(elapsedMs: Long, totalDurationMs: Long = DEFAULT_HOLD_DURATION_MS): Float {
         if (totalDurationMs <= 0L) return 1f

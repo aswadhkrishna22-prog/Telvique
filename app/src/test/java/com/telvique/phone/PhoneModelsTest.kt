@@ -216,7 +216,7 @@ class PhoneModelsTest {
 
         // Slide answer threshold
         assertFalse(SlideToAnswerUtils.isSlideAnswerThresholdReached(400f, maxDragPx))
-        assertTrue(SlideToAnswerUtils.isSlideAnswerThresholdReached(maxDragPx * 0.72f, maxDragPx))
+        assertTrue(SlideToAnswerUtils.isSlideAnswerThresholdReached(maxDragPx * 0.80f, maxDragPx))
         assertTrue(SlideToAnswerUtils.isSlideAnswerThresholdReached(500f, maxDragPx))
 
         // Text alpha calculations

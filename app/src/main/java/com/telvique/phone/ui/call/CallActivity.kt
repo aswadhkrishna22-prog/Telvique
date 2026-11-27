@@ -108,6 +108,8 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
@@ -377,26 +379,71 @@ private fun CallScreen(
                     modifier = Modifier.fillMaxSize()
                 )
 
-                // 2. Progressive glass blur layer (Android 12+ API 31 only)
-                // Minimal at top (face/name area sharp), gradually increasing downwards towards buttons
+                // 2. Progressive glass blur layers (Android 12+ API 31 only)
+                // Minimal at top (face/name area top ~55% sharp), 55% -> 100% blur 0 -> ~24dp via 3 stacked layers with vertical alpha masks
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    // Stacked Layer 1: Mild blur (~8dp), mask fades in from 55% to 72%
                     AsyncImage(
                         model = primary?.photoUri,
                         contentDescription = null,
                         contentScale = ContentScale.Crop,
                         modifier = Modifier
                             .fillMaxSize()
-                            .blur(radius = 22.dp)
-                            .graphicsLayer {
-                                alpha = 0.99f
-                            }
+                            .blur(radius = 8.dp)
+                            .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
                             .drawWithContent {
                                 drawContent()
                                 drawRect(
                                     brush = Brush.verticalGradient(
                                         0.00f to Color.Transparent,
-                                        0.30f to Color.Transparent,
-                                        0.65f to Color.Black,
+                                        0.55f to Color.Transparent,
+                                        0.72f to Color.Black,
+                                        1.00f to Color.Black
+                                    ),
+                                    blendMode = BlendMode.DstIn
+                                )
+                            }
+                    )
+
+                    // Stacked Layer 2: Medium blur (~16dp), mask fades in from 68% to 85%
+                    AsyncImage(
+                        model = primary?.photoUri,
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .blur(radius = 16.dp)
+                            .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+                            .drawWithContent {
+                                drawContent()
+                                drawRect(
+                                    brush = Brush.verticalGradient(
+                                        0.00f to Color.Transparent,
+                                        0.68f to Color.Transparent,
+                                        0.85f to Color.Black,
+                                        1.00f to Color.Black
+                                    ),
+                                    blendMode = BlendMode.DstIn
+                                )
+                            }
+                    )
+
+                    // Stacked Layer 3: Deep blur (~24dp), mask fades in from 82% to 100%
+                    AsyncImage(
+                        model = primary?.photoUri,
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .blur(radius = 24.dp)
+                            .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+                            .drawWithContent {
+                                drawContent()
+                                drawRect(
+                                    brush = Brush.verticalGradient(
+                                        0.00f to Color.Transparent,
+                                        0.82f to Color.Transparent,
+                                        0.96f to Color.Black,
                                         1.00f to Color.Black
                                     ),
                                     blendMode = BlendMode.DstIn
@@ -405,18 +452,19 @@ private fun CallScreen(
                     )
                 }
 
-                // 3. Cinematic vertical scrim for AA+ text legibility & button contrast (transparent -> black alpha ~0.55)
+                // 3. Bottom dark scrim (transparent -> black alpha ~0.60, with subtle top vignette for status bar)
+                // Fallback API < 31: this scrim alone is applied over the base photo
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
                         .background(
                             Brush.verticalGradient(
-                                0.00f to Color.Black.copy(alpha = 0.65f),
-                                0.28f to Color.Black.copy(alpha = 0.35f),
-                                0.45f to Color.Transparent,
-                                0.60f to Color.Transparent,
-                                0.78f to Color.Black.copy(alpha = 0.40f),
-                                1.00f to Color.Black.copy(alpha = 0.58f)
+                                0.00f to Color.Black.copy(alpha = 0.50f),
+                                0.18f to Color.Black.copy(alpha = 0.22f),
+                                0.40f to Color.Transparent,
+                                0.55f to Color.Transparent,
+                                0.75f to Color.Black.copy(alpha = 0.35f),
+                                1.00f to Color.Black.copy(alpha = 0.60f)
                             )
                         )
                 )
@@ -479,8 +527,8 @@ private fun CallScreen(
                 Text(
                     text = statusText,
                     style = TextStyle(
-                        color = Color.White.copy(alpha = 0.85f),
-                        fontSize = 17.sp,
+                        color = Color.White.copy(alpha = if (primary.phase == CallPhase.RINGING) 0.75f else 0.85f),
+                        fontSize = if (primary.phase == CallPhase.RINGING) 16.sp else 17.sp,
                         fontWeight = FontWeight.Medium,
                         fontFeatureSettings = "tnum"
                     )
@@ -488,13 +536,23 @@ private fun CallScreen(
 
                 Spacer(modifier = Modifier.height(6.dp))
 
+                val density = LocalDensity.current
+                val nameShadow = if (primary.phase == CallPhase.RINGING) {
+                    Shadow(
+                        color = Color.Black.copy(alpha = 0.35f),
+                        offset = Offset(0f, 2f),
+                        blurRadius = with(density) { 8.dp.toPx() }
+                    )
+                } else null
+
                 Text(
                     text = primary.displayName,
                     color = Color.White,
-                    fontSize = 32.sp,
+                    fontSize = if (primary.phase == CallPhase.RINGING) 34.sp else 32.sp,
                     fontWeight = FontWeight.SemiBold,
                     letterSpacing = (-0.5).sp,
                     textAlign = TextAlign.Center,
+                    style = TextStyle(shadow = nameShadow),
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -518,8 +576,8 @@ private fun CallScreen(
                     ) {
                         Text(
                             text = PhoneFormatUtils.formatDisplayNumber(primary.number),
-                            color = Color.White.copy(alpha = 0.70f),
-                            fontSize = 15.sp,
+                            color = Color.White.copy(alpha = if (primary.phase == CallPhase.RINGING) 0.75f else 0.70f),
+                            fontSize = if (primary.phase == CallPhase.RINGING) 18.sp else 15.sp,
                             fontWeight = FontWeight.Medium,
                             textAlign = TextAlign.Center
                         )
@@ -609,25 +667,24 @@ private fun CallScreen(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .widthIn(max = 340.dp)
                             .padding(horizontal = 8.dp),
-                        horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally),
+                        horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        IncomingCallGlassPillButton(
-                            icon = ApplePhoneIcons.MessageOutline,
+                        IncomingCallGlassCircleButton(
+                            icon = ApplePhoneIcons.MessageFill,
                             label = "Message",
                             backdrop = posterBackdrop,
                             onClick = { showSmsSheet = true },
-                            modifier = Modifier.weight(1f)
+                            isDarkTint = false
                         )
 
-                        IncomingCallGlassPillButton(
-                            icon = ApplePhoneIcons.SpeakerSlashOutline,
+                        IncomingCallGlassCircleButton(
+                            icon = ApplePhoneIcons.BellSlash,
                             label = "Silence",
                             backdrop = posterBackdrop,
                             onClick = onSilenceRinger,
-                            modifier = Modifier.weight(1f)
+                            isDarkTint = true
                         )
                     }
 
@@ -657,7 +714,7 @@ private fun CallScreen(
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(30.dp))
+                    Spacer(modifier = Modifier.height(56.dp))
 
                     if (secondary != null) {
                         Row(
@@ -695,7 +752,8 @@ private fun CallScreen(
                             onDecline = { onDecline(primary.id) },
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(bottom = 48.dp)
+                                .padding(horizontal = 12.dp)
+                                .padding(bottom = 60.dp)
                         )
                     }
                 } else {
@@ -1830,65 +1888,108 @@ private fun SimChip(
 }
 
 @Composable
-private fun IncomingCallGlassPillButton(
+private fun IncomingCallGlassCircleButton(
     icon: ImageVector,
     label: String,
     backdrop: Backdrop?,
     onClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    isDarkTint: Boolean = false
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
+    val haptics = LocalHapticFeedback.current
+
+    LaunchedEffect(isPressed) {
+        if (isPressed) {
+            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+        }
+    }
 
     val scale by animateFloatAsState(
-        targetValue = if (isPressed) 0.96f else 1.0f,
-        animationSpec = tween(durationMillis = 120, easing = FastOutSlowInEasing),
-        label = "pill_button_scale"
-    )
-    val alpha by animateFloatAsState(
-        targetValue = if (isPressed) 0.80f else 1.0f,
-        animationSpec = tween(durationMillis = 120, easing = FastOutSlowInEasing),
-        label = "pill_button_alpha"
+        targetValue = if (isPressed) 0.94f else 1.0f,
+        animationSpec = tween(durationMillis = 100, easing = FastOutSlowInEasing),
+        label = "glass_circle_scale"
     )
 
-    Row(
-        modifier = modifier
-            .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
-                this.alpha = alpha
-            }
-            .backdropLiquidGlass(
-                backdrop = backdrop,
-                shape = CircleShape,
-                isDark = true,
-                interactive = false,
-                hasLens = false,
-                scrimAlpha = 0.12f,
-                fallbackTint = Color.White.copy(alpha = 0.12f)
-            )
-            .border(1.dp, Color.White.copy(alpha = 0.18f), CircleShape)
-            .clip(CircleShape)
-            .clickable(
-                interactionSource = interactionSource,
-                indication = null,
-                onClick = onClick
-            )
-            .padding(horizontal = 16.dp, vertical = 11.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.Center
+    Column(
+        modifier = modifier,
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = label,
-            tint = Color.White,
-            modifier = Modifier.size(19.dp)
-        )
-        Spacer(modifier = Modifier.width(7.dp))
+        Box(
+            modifier = Modifier
+                .size(64.dp)
+                .graphicsLayer {
+                    scaleX = scale
+                    scaleY = scale
+                }
+                .backdropLiquidGlass(
+                    backdrop = backdrop,
+                    shape = CircleShape,
+                    isDark = true,
+                    interactive = false,
+                    hasLens = false,
+                    scrimAlpha = if (isDarkTint) 0.30f else 0.14f,
+                    fallbackTint = if (isDarkTint) Color.Black.copy(alpha = 0.30f) else Color.White.copy(alpha = 0.14f)
+                )
+                .then(
+                    if (isDarkTint) {
+                        Modifier.background(Color.Black.copy(alpha = 0.30f), CircleShape)
+                    } else {
+                        Modifier
+                    }
+                )
+                .background(Color.White.copy(alpha = 0.14f), CircleShape)
+                .border(
+                    width = 1.dp,
+                    brush = Brush.linearGradient(
+                        colors = listOf(
+                            Color.White.copy(alpha = 0.40f),
+                            Color.White.copy(alpha = 0.05f)
+                        ),
+                        start = Offset.Zero,
+                        end = Offset.Infinite
+                    ),
+                    shape = CircleShape
+                )
+                .drawWithContent {
+                    drawContent()
+                    // Inner top highlight (linear white alpha 0.18 -> 0)
+                    drawCircle(
+                        brush = Brush.verticalGradient(
+                            colors = listOf(
+                                Color.White.copy(alpha = 0.18f),
+                                Color.Transparent
+                            ),
+                            startY = 0f,
+                            endY = size.height * 0.65f
+                        ),
+                        radius = size.minDimension / 2f,
+                        center = center
+                    )
+                }
+                .clip(CircleShape)
+                .clickable(
+                    interactionSource = interactionSource,
+                    indication = null,
+                    onClick = onClick
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = label,
+                tint = Color.White,
+                modifier = Modifier.size(26.dp)
+            )
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
         Text(
             text = label,
-            color = Color.White,
-            fontSize = 15.sp,
+            color = Color.White.copy(alpha = 0.90f),
+            fontSize = 13.sp,
             fontWeight = FontWeight.Medium,
             textAlign = TextAlign.Center
         )
@@ -1959,15 +2060,15 @@ private fun AppleSlideToAnswerPill(
         modifier = modifier,
         contentAlignment = Alignment.Center
     ) {
-        // Slide to Answer Track (height ~66dp, full pill glass)
+        // Slide to Answer Track (height ~72dp, full pill glass)
         BoxWithConstraints(
             modifier = Modifier
                 .fillMaxWidth()
                 .widthIn(max = 420.dp)
-                .height(66.dp)
+                .height(72.dp)
         ) {
-            val thumbSize = 58.dp
-            val trackPadding = 4.dp
+            val thumbSize = 60.dp
+            val trackPadding = 6.dp
             val maxDragPx = with(density) {
                 (maxWidth - (trackPadding * 2) - thumbSize).toPx().coerceAtLeast(1f)
             }
@@ -1986,16 +2087,17 @@ private fun AppleSlideToAnswerPill(
             )
 
             val trackWidthPx = with(density) { maxWidth.toPx() }
+            val trackHeightPx = with(density) { 72.dp.toPx() }
             val shimmerBrush = remember(shimmerProgress, trackWidthPx) {
                 val startX = -trackWidthPx + (shimmerProgress * trackWidthPx * 2.2f)
                 Brush.linearGradient(
                     colors = listOf(
-                        Color.White.copy(alpha = 0.32f),
-                        Color.White.copy(alpha = 0.88f),
-                        Color.White.copy(alpha = 0.32f)
+                        Color.White.copy(alpha = 0.35f),
+                        Color.White.copy(alpha = 0.90f),
+                        Color.White.copy(alpha = 0.35f)
                     ),
                     start = Offset(startX, 0f),
-                    end = Offset(startX + (trackWidthPx * 0.40f).coerceAtLeast(100f), 0f)
+                    end = Offset(startX + (trackWidthPx * 0.38f).coerceAtLeast(100f), 0f)
                 )
             }
 
@@ -2045,20 +2147,36 @@ private fun AppleSlideToAnswerPill(
                         isDark = true,
                         interactive = false,
                         hasLens = false,
-                        scrimAlpha = 0.35f,
-                        fallbackTint = Color.Black.copy(alpha = 0.35f)
+                        scrimAlpha = 0.10f,
+                        fallbackTint = Color.White.copy(alpha = 0.10f)
                     )
+                    .background(Color.White.copy(alpha = 0.10f), CircleShape)
                     .border(
-                        width = 1.dp,
-                        brush = Brush.verticalGradient(
+                        width = 1.5.dp,
+                        brush = Brush.linearGradient(
                             colors = listOf(
-                                Color.White.copy(alpha = 0.30f),
-                                Color.White.copy(alpha = 0.08f)
-                            )
+                                Color.White.copy(alpha = 0.45f),
+                                Color.Transparent,
+                                Color.White.copy(alpha = 0.25f)
+                            ),
+                            start = Offset(0f, 0f),
+                            end = Offset(trackWidthPx, trackHeightPx)
                         ),
                         shape = CircleShape
                     )
                     .clip(CircleShape)
+                    .drawWithContent {
+                        drawContent()
+                        // Subtle inner shadow at top rim
+                        drawRect(
+                            brush = Brush.verticalGradient(
+                                0.0f to Color.Black.copy(alpha = 0.25f),
+                                0.35f to Color.Black.copy(alpha = 0.08f),
+                                1.0f to Color.Transparent
+                            ),
+                            size = Size(size.width, 16.dp.toPx())
+                        )
+                    }
                     .padding(trackPadding)
                     .semantics(mergeDescendants = true) {
                         role = Role.Button
@@ -2186,18 +2304,32 @@ private fun AppleSlideToAnswerPill(
             ) {
                 val textAlpha = SlideToAnswerUtils.calculateTextAlpha(offsetX.value, maxDragPx)
 
-                Text(
-                    text = "slide to answer  ›",
-                    style = TextStyle(
-                        brush = shimmerBrush,
-                        fontSize = 17.sp,
-                        fontWeight = FontWeight.Medium,
-                        letterSpacing = 0.4.sp
-                    ),
+                Row(
                     modifier = Modifier
                         .align(Alignment.Center)
-                        .alpha(textAlpha)
-                )
+                        .alpha(textAlpha),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Text(
+                        text = "slide to answer",
+                        style = TextStyle(
+                            brush = shimmerBrush,
+                            fontSize = 19.sp,
+                            fontWeight = FontWeight.Normal,
+                            letterSpacing = 0.2.sp
+                        )
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "›",
+                        style = TextStyle(
+                            brush = shimmerBrush,
+                            fontSize = 22.sp,
+                            fontWeight = FontWeight.Light
+                        )
+                    )
+                }
 
                 val thumbScale = if (holdProgress.value > 0f) {
                     1f - (0.05f * holdProgress.value)
@@ -2206,6 +2338,7 @@ private fun AppleSlideToAnswerPill(
                 }
 
                 // Draggable Green Circular Knob with Long-Press-to-Decline & Inner Highlight
+                val thumbSizePx = with(density) { thumbSize.toPx() }
                 Box(
                     modifier = Modifier
                         .offset { IntOffset(offsetX.value.roundToInt(), 0) }
@@ -2215,13 +2348,13 @@ private fun AppleSlideToAnswerPill(
                             scaleY = thumbScale
                         }
                         .drawBehind {
-                            // Soft glow shadow behind knob (green alpha ~0.35, blur ~16dp)
-                            val glowRadius = (size.minDimension / 2f) + 14.dp.toPx()
+                            // Soft glow shadow behind knob (green alpha ~0.38, blur ~16dp)
+                            val glowRadius = (size.minDimension / 2f) + 16.dp.toPx()
                             drawCircle(
                                 brush = Brush.radialGradient(
                                     colors = listOf(
-                                        TelviqueColors.CallGreen.copy(alpha = 0.35f),
-                                        TelviqueColors.CallGreen.copy(alpha = 0.12f),
+                                        Color(0xFF4CD964).copy(alpha = 0.38f),
+                                        Color(0xFF34C759).copy(alpha = 0.14f),
                                         Color.Transparent
                                     ),
                                     center = center,
@@ -2233,31 +2366,36 @@ private fun AppleSlideToAnswerPill(
                         }
                         .clip(CircleShape)
                         .background(
-                            brush = Brush.verticalGradient(
+                            brush = Brush.radialGradient(
                                 colors = listOf(
-                                    Color(0xFF38E562),
-                                    TelviqueColors.CallGreen,
-                                    Color(0xFF20B33A)
-                                )
+                                    Color(0xFF5CEB76),
+                                    Color(0xFF4CD964),
+                                    Color(0xFF2EB348),
+                                    Color(0xFF1E7B34)
+                                ),
+                                center = Offset(thumbSizePx * 0.42f, thumbSizePx * 0.32f),
+                                radius = thumbSizePx * 0.70f
                             ),
                             shape = CircleShape
                         )
                         .border(1.dp, Color.White.copy(alpha = 0.35f), CircleShape)
                         .drawWithContent {
                             drawContent()
-                            // Subtle inner highlight (top-light gradient)
-                            drawCircle(
-                                brush = Brush.verticalGradient(
+                            // Top elliptical white highlight (alpha 0.50 -> 0)
+                            val highlightWidth = size.width * 0.62f
+                            val highlightHeight = size.height * 0.34f
+                            drawOval(
+                                brush = Brush.radialGradient(
                                     colors = listOf(
-                                        Color.White.copy(alpha = 0.40f),
-                                        Color.White.copy(alpha = 0.10f),
+                                        Color.White.copy(alpha = 0.50f),
+                                        Color.White.copy(alpha = 0.18f),
                                         Color.Transparent
                                     ),
-                                    startY = 0f,
-                                    endY = size.height * 0.55f
+                                    center = Offset(size.width / 2f, highlightHeight * 0.60f),
+                                    radius = highlightWidth / 2f
                                 ),
-                                radius = size.minDimension / 2f,
-                                center = center
+                                topLeft = Offset((size.width - highlightWidth) / 2f, 2.dp.toPx()),
+                                size = Size(highlightWidth, highlightHeight)
                             )
                         },
                     contentAlignment = Alignment.Center
@@ -2266,7 +2404,7 @@ private fun AppleSlideToAnswerPill(
                         imageVector = ApplePhoneIcons.PhoneFill,
                         contentDescription = null,
                         tint = Color.White,
-                        modifier = Modifier.size(26.dp)
+                        modifier = Modifier.size(28.dp)
                     )
 
                     // Subtle red progress animation around the slider handle while holding
