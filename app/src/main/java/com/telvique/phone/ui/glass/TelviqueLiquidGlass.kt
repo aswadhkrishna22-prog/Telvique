@@ -27,6 +27,7 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.CornerRadius
@@ -346,7 +347,7 @@ fun Modifier.clearLiquidGlassPill(
     isDark: Boolean = false,
     blurRadius: Dp = 8.dp,
     tintAlpha: Float = if (isDark) 0.14f else 0.62f,
-    showBorder: Boolean = true,
+    showBorder: Boolean = false,
     shadowElevation: Dp = 6.dp,
 ): Modifier = composed {
     val glassTint = if (isDark) {
@@ -393,6 +394,22 @@ fun Modifier.clearLiquidGlassPill(
                 Modifier.background(glassTint, shape = shape)
             },
         )
+        .drawBehind {
+            val w = size.width
+            val h = size.height
+            val rimGlowAlpha = if (isDark) 0.08f else 0.16f
+            drawRoundRect(
+                brush = Brush.linearGradient(
+                    0.00f to Color.White.copy(alpha = rimGlowAlpha),
+                    0.30f to Color.White.copy(alpha = rimGlowAlpha * 0.35f),
+                    0.60f to Color.Transparent,
+                    1.00f to Color.Transparent,
+                    start = Offset(0f, 0f),
+                    end = Offset(w * 0.65f, h * 0.65f)
+                ),
+                cornerRadius = CornerRadius(h / 2f)
+            )
+        }
         .then(
             if (showBorder) {
                 Modifier.liquidBubbleHighlight(isDark = isDark, cornerFraction = 0.5f)
