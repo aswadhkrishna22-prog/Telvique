@@ -4,4 +4,19 @@
     <string name="channel_incoming_call">Incoming Calls</string>
     <string name="channel_ongoing_call">Ongoing Calls</string>
     <string name="channel_missed_call">Missed Calls</string>
+    <string name="cnap_operator_records_label">Name from operator records</string>
+
+    <!-- Verify caller protection -->
+    <string name="verify_caller_action">Verify caller</string>
+    <string name="verify_caller_sheet_title">Is this really who they say they are?</string>
+    <string name="verify_caller_sheet_body">Hang up and call them back on a number you saved.</string>
+    <string name="verify_caller_search_placeholder">Search saved contacts</string>
+    <string name="verify_caller_cancel">Cancel</string>
+    <string name="verify_caller_permission_title">Contacts permission required</string>
+    <string name="verify_caller_permission_message">Contacts access is needed to show your saved contacts.</string>
+    <string name="verify_caller_grant_permission">Allow Access</string>
+    <string name="verify_caller_no_number">This contact has no phone number.</string>
+    <string name="verify_caller_choose_number_title">Choose a number</string>
+    <string name="verify_caller_empty_search">No contacts found</string>
+    <string name="verify_caller_loading">Loading contacts…</string>
 </resources>

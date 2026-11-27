@@ -13,13 +13,16 @@ import android.telecom.CallEndpoint
 import android.telecom.CallEndpointException
 import android.telecom.Connection
 import android.telecom.DisconnectCause
+import android.telecom.TelecomManager
 import android.telecom.VideoProfile
+import android.util.Log
 import androidx.annotation.RequiresApi
 import com.telvique.phone.data.PhoneRepository
 import com.telvique.phone.data.SettingsRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -62,6 +65,7 @@ data class CallUiItem(
     val isNetworkVerified: Boolean = false,
     val isPotentialSpam: Boolean = false,
     val participants: List<ConferenceParticipant> = emptyList(),
+    val isSavedContact: Boolean = false,
 )
 
 data class CallAudioUiState(
@@ -116,10 +120,12 @@ object CallManager {
         _missedCallCount.value = 0
     }
 
-    fun lookupCachedCnapName(number: String): String? {
+    fun lookupCachedCnapName(number: String, context: Context? = null): String? {
         val tail = com.telvique.phone.data.PhoneFormatUtils.comparableTail(number)
         if (tail.isEmpty()) return null
-        return cnapNameCache[tail]
+        return cnapNameCache[tail] ?: context?.let {
+            com.telvique.phone.data.CnapRepository.getInstance(it).getLatestCnapForNumber(number)
+        }
     }
 
     fun attachService(service: TelviqueInCallService) {
@@ -146,6 +152,11 @@ object CallManager {
         if (initialState == Call.STATE_RINGING) ringingCallIds.add(id)
         if (initialState == Call.STATE_ACTIVE) wasEverActiveCallIds.add(id)
 
+        // TEMPORARY DEBUG LOG - REMOVABLE (tag: "CNAP")
+        val initialName = runCatching { call.details?.callerDisplayName?.toString() }.getOrNull()?.trim()
+        val initialPres = runCatching { call.details?.callerDisplayNamePresentation }.getOrDefault(-1)
+        Log.d("CNAP", "onCallAdded [call=$id]: callerDisplayName='$initialName', presentation=$initialPres")
+
         val callback = object : Call.Callback() {
             override fun onStateChanged(call: Call, state: Int) {
                 if (state == Call.STATE_RINGING) ringingCallIds.add(id)
@@ -167,6 +178,10 @@ object CallManager {
             }
 
             override fun onDetailsChanged(call: Call, details: Call.Details) {
+                // TEMPORARY DEBUG LOG - REMOVABLE (tag: "CNAP")
+                val dName = runCatching { details.callerDisplayName?.toString() }.getOrNull()?.trim()
+                val dPres = runCatching { details.callerDisplayNamePresentation }.getOrDefault(-1)
+                Log.d("CNAP", "onDetailsChanged [call=$id]: callerDisplayName='$dName', presentation=$dPres")
                 refreshState(context)
                 serviceRef?.onCallsUpdated()
             }
@@ -334,6 +349,29 @@ object CallManager {
         }
     }
 
+    fun disconnectAndCall(
+        context: Context,
+        disconnectCallId: String?,
+        newNumber: String
+    ) {
+        val targetCall = findCall(disconnectCallId)
+            ?: _uiState.value.primaryCall?.id?.let { activeCalls[it] }
+        val accountHandle = targetCall?.details?.accountHandle
+
+        scope.launch {
+            if (targetCall != null) {
+                if (getCallState(targetCall) == Call.STATE_RINGING) {
+                    targetCall.reject(false, null)
+                } else {
+                    targetCall.disconnect()
+                }
+            }
+            delay(400)
+            val repo = PhoneRepository(context.applicationContext)
+            repo.placeCall(newNumber, accountHandle)
+        }
+    }
+
     fun toggleHold(callId: String? = null) {
         val call = findCall(callId) ?: _uiState.value.primaryCall?.id?.let { activeCalls[it] } ?: return
         if (getCallState(call) == Call.STATE_HOLDING) {
@@ -458,10 +496,13 @@ object CallManager {
         if (isMissed) {
             val number = extractNumber(call)
             val resolvedName = resolvedContacts[number]?.first?.takeIf { it.isNotBlank() }
-            val callerName = call.details.callerDisplayName?.takeIf { it.isNotBlank() }
-            val display = resolvedName ?: callerName ?: number
+            val rawCallerName = runCatching { call.details?.callerDisplayName?.toString() }.getOrNull()?.trim()
+            val pres = runCatching { call.details?.callerDisplayNamePresentation }.getOrDefault(-1)
+            val cnapName = if (pres == TelecomManager.PRESENTATION_ALLOWED && !rawCallerName.isNullOrBlank()) rawCallerName else null
+            val isOperatorName = resolvedName == null && cnapName != null
+            val display = resolvedName ?: cnapName ?: number
             _missedCallCount.value = _missedCallCount.value + 1
-            CallNotificationHelper.showMissedCall(context, display, number)
+            CallNotificationHelper.showMissedCall(context, display, number, isOperatorName)
         }
     }
 
@@ -474,11 +515,23 @@ object CallManager {
             val details = call.details
             val number = extractNumber(call)
             val resolved = resolvedContacts[number]
+
+            val rawCallerName = runCatching { details.callerDisplayName?.toString() }.getOrNull()?.trim()
+            val presentation = runCatching { details.callerDisplayNamePresentation }.getOrDefault(TelecomManager.PRESENTATION_UNKNOWN)
+
+            // TEMPORARY DEBUG LOG - REMOVABLE (tag: "CNAP")
+            Log.d("CNAP", "refreshState Call $id [${details.handle}]: callerDisplayName='$rawCallerName', presentation=$presentation")
+
+            val isCnapAllowed = presentation == TelecomManager.PRESENTATION_ALLOWED && !rawCallerName.isNullOrBlank()
+            val validCnapName = if (isCnapAllowed) rawCallerName else null
+
             val isConference = details.hasProperty(Call.Details.PROPERTY_CONFERENCE)
             val participants = call.children.mapIndexed { idx, child ->
                 val childNum = extractNumber(child)
                 val childResolved = resolvedContacts[childNum]?.first?.takeIf { it.isNotBlank() }
-                val childCnap = child.details.callerDisplayName?.takeIf { it.isNotBlank() }
+                val childRaw = runCatching { child.details?.callerDisplayName?.toString() }.getOrNull()?.trim()
+                val childPres = runCatching { child.details?.callerDisplayNamePresentation }.getOrDefault(-1)
+                val childCnap = if (childPres == TelecomManager.PRESENTATION_ALLOWED && !childRaw.isNullOrBlank()) childRaw else null
                 val childDisplay = childResolved ?: childCnap ?: childNum.ifBlank { "Participant ${idx + 1}" }
                 val childKey = "${id}_child_${idx}"
                 childCallsById[childKey] = child
@@ -496,11 +549,17 @@ object CallManager {
             } else {
                 null
             }
-            val callerName = details.callerDisplayName?.takeIf { it.isNotBlank() }
-            if (callerName != null && number.isNotBlank()) {
+            val isSavedContact = (resolvedName != null || contactName != null)
+            val savedName = resolvedName ?: contactName
+
+            if (validCnapName != null && number.isNotBlank() && !isSavedContact) {
                 val tail = com.telvique.phone.data.PhoneFormatUtils.comparableTail(number)
-                if (tail.isNotEmpty()) cnapNameCache[tail] = callerName
+                if (tail.isNotEmpty()) {
+                    cnapNameCache[tail] = validCnapName
+                }
+                com.telvique.phone.data.CnapRepository.getInstance(context).recordCallSession(number, validCnapName)
             }
+
             val verificationStatus = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 details.callerNumberVerificationStatus
             } else {
@@ -511,16 +570,15 @@ object CallManager {
             val isVerificationFailed = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
                 verificationStatus == Connection.VERIFICATION_STATUS_FAILED
             val isIndianTelemarketer = com.telvique.phone.data.PhoneFormatUtils.isSuspectedTelemarketer(number)
-            val isPotentialSpam = resolvedName == null && contactName == null &&
+            val isPotentialSpam = !isSavedContact &&
                 (isVerificationFailed || isIndianTelemarketer)
 
-            val networkName = if (resolvedName == null && contactName == null) callerName else null
+            val networkName = if (!isSavedContact) validCnapName else null
             val displayName = when {
                 isConference && participants.isNotEmpty() -> "Conference (${participants.size})"
                 isConference -> "Conference Call"
-                resolvedName != null -> resolvedName
-                contactName != null -> contactName
-                callerName != null -> callerName
+                savedName != null -> savedName
+                validCnapName != null -> validCnapName
                 number.isNotBlank() -> number
                 else -> "Unknown Caller"
             }
@@ -553,6 +611,7 @@ object CallManager {
                 isNetworkVerified = isNetworkVerified,
                 isPotentialSpam = isPotentialSpam,
                 participants = participants,
+                isSavedContact = isSavedContact,
             )
         }
 

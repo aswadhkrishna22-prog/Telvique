@@ -41,10 +41,13 @@ data class CallLogItem(
     val timestamp: Long,
     val durationSeconds: Long,
     val simLabel: String?,
-    val photoUri: String?
+    val photoUri: String?,
+    val cnapName: String? = null
 ) {
     val displayTitle: String
-        get() = cachedName?.takeIf { it.isNotBlank() } ?: number.ifBlank { "Private Number" }
+        get() = cachedName?.takeIf { it.isNotBlank() }
+            ?: cnapName?.takeIf { it.isNotBlank() }
+            ?: number.ifBlank { "Private Number" }
 }
 
 data class GroupedCallLogItem(
