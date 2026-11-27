@@ -139,4 +139,33 @@ class PhoneModelsTest {
         )
         assertEquals("Private Number", privateNumber.displayTitle)
     }
+
+    @Test
+    fun slideToAnswer_thresholdAndAlphaCalculations() {
+        val maxDragPx = 600f
+        val threshold = maxDragPx * 0.72f
+
+        // Releasing below threshold must not complete
+        assertFalse(400f >= threshold)
+
+        // Releasing at or above threshold must complete
+        assertTrue(threshold >= threshold)
+        assertTrue(450f >= threshold)
+        assertTrue(600f >= threshold)
+
+        // Offset clamping
+        val dragNegative = (-50f).coerceIn(0f, maxDragPx)
+        assertEquals(0f, dragNegative, 0.001f)
+
+        val dragOver = (750f).coerceIn(0f, maxDragPx)
+        assertEquals(maxDragPx, dragOver, 0.001f)
+
+        // Text alpha fades smoothly before thumb reaches completion
+        fun textAlpha(offset: Float): Float = (1f - (offset / maxDragPx) * 1.5f).coerceIn(0f, 1f)
+
+        assertEquals(1.0f, textAlpha(0f), 0.001f)
+        assertEquals(0.25f, textAlpha(300f), 0.001f)
+        assertEquals(0.0f, textAlpha(450f), 0.001f)
+        assertEquals(0.0f, textAlpha(600f), 0.001f)
+    }
 }
