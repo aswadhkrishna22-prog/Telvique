@@ -3,8 +3,8 @@ package com.telvique.phone.ui.glass
 import android.os.Build
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandHorizontally
@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.absoluteOffset
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -33,14 +34,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
@@ -53,6 +52,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.AbsoluteAlignment
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -94,6 +94,8 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
+val LocalDisableAnimations = staticCompositionLocalOf { false }
+
 @Immutable
 data class LiquidPhoneTabItem(
     val label: String,
@@ -105,14 +107,18 @@ data class LiquidPhoneTabItem(
 private val LensShape = CircleShape
 
 private object TabBarMotion {
-    const val Damping = 0.82f
-    const val Stiffness = 800f
+    const val Damping = 0.8f
+    const val Stiffness = 400f
+    const val TrailingDamping = 0.85f
+    const val TrailingStiffness = 450f
+    const val LiftDamping = 0.90f
+    const val LiftStiffness = 520f
 }
 
 /**
- * Floating Apple iOS 26 Liquid Glass tab bar ported from OzonePlayer's LiquidNavigationBar.
- * Uses fletchmckee.liquid real-time refraction + draggable water-drop lens on Android 13+,
- * and crisp frosted glass pill on Android 8-12.
+ * Floating Apple iOS Liquid Glass tab bar ported from OzonePlayer's LiquidNavigationBar architecture.
+ * Uses fletchmckee.liquid real-time refraction + draggable water-drop lens on capable Android 13+ devices,
+ * and crisp frosted glass pill with liquidBubbleHighlight on low-RAM and Android 8-12 devices.
  */
 @Composable
 fun LiquidPhoneTabBar(
@@ -121,8 +127,10 @@ fun LiquidPhoneTabBar(
     selectedIndex: Int,
     onSelect: (Int) -> Unit,
     modifier: Modifier = Modifier,
+    onScrubSelect: ((Int) -> Unit)? = null,
     isDark: Boolean = isSystemInDarkTheme(),
     maxWidthDp: Dp = 330.dp,
+    disableAnimations: Boolean = LocalDisableAnimations.current,
 ) {
     if (items.isEmpty()) return
     val useRealLiquid = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && liquidState != null
@@ -134,6 +142,7 @@ fun LiquidPhoneTabBar(
     val count = items.size
     val selected by rememberUpdatedState(selectedIndex)
     val select by rememberUpdatedState(onSelect)
+    val scrub by rememberUpdatedState(onScrubSelect ?: onSelect)
     val start = visualIndex(selectedIndex, count, isRtl)
     val settledPosition = remember(count, isRtl) { Animatable(start) }
     val trailingPosition = remember(count, isRtl) { Animatable(start) }
@@ -147,29 +156,45 @@ fun LiquidPhoneTabBar(
 
     val lift by animateFloatAsState(
         targetValue = if (pressed) 1f else 0f,
-        animationSpec = spring(dampingRatio = 0.90f, stiffness = 700f),
+        animationSpec = if (disableAnimations) {
+            snap()
+        } else {
+            spring(dampingRatio = TabBarMotion.LiftDamping, stiffness = TabBarMotion.LiftStiffness)
+        },
         label = "liquidDropLift",
     )
     val currentPosition = {
         if (touchPosition.isFinite()) touchPosition else settledPosition.value
     }
 
-    LaunchedEffect(selectedIndex, pressed, releaseGeneration) {
+    LaunchedEffect(selectedIndex, pressed, releaseGeneration, disableAnimations) {
         if (!pressed) {
+            val target = visualIndex(selectedIndex, count, isRtl)
             if (touchPosition.isFinite()) {
                 settledPosition.snapTo(touchPosition)
                 touchPosition = Float.NaN
             }
-            settledPosition.animateTo(
-                visualIndex(selectedIndex, count, isRtl),
-                spring(dampingRatio = TabBarMotion.Damping, stiffness = TabBarMotion.Stiffness),
-            )
+            if (disableAnimations) {
+                settledPosition.snapTo(target)
+            } else {
+                settledPosition.animateTo(
+                    target,
+                    spring(dampingRatio = TabBarMotion.Damping, stiffness = TabBarMotion.Stiffness),
+                )
+            }
         }
     }
 
-    LaunchedEffect(count, isRtl) {
-        snapshotFlow { currentPosition() }.collectLatest {
-            trailingPosition.animateTo(it, spring(dampingRatio = 0.85f, stiffness = 900f))
+    LaunchedEffect(count, isRtl, disableAnimations) {
+        snapshotFlow { currentPosition() }.collectLatest { pos ->
+            if (disableAnimations) {
+                trailingPosition.snapTo(pos)
+            } else {
+                trailingPosition.animateTo(
+                    pos,
+                    spring(dampingRatio = TabBarMotion.TrailingDamping, stiffness = TabBarMotion.TrailingStiffness),
+                )
+            }
         }
     }
 
@@ -177,7 +202,7 @@ fun LiquidPhoneTabBar(
     val activeInk = palette.accentBlue
     val pageColor = palette.background
     val surfaceColor = palette.cardSurface
-    val railTint = if (isDark) Color(0xFF14161F).copy(alpha = 0.72f) else Color(0xFFF6F6F9).copy(alpha = 0.78f)
+    val railTint = railTint(isDark)
     val railState = if (useRealLiquid) rememberLiquidState() else null
     val railHeight = 58.dp
     val pressedScale = railHeight.value / (railHeight.value - 8f)
@@ -185,11 +210,16 @@ fun LiquidPhoneTabBar(
     val activeIndex = captionIndex.coerceIn(0, count - 1)
 
     val animFractions = List(count) { i ->
-        animateFloatAsState(
-            targetValue = if (activeIndex == i) 1f else 0f,
-            animationSpec = spring(dampingRatio = TabBarMotion.Damping, stiffness = TabBarMotion.Stiffness),
-            label = "tab_expand_$i",
-        ).value
+        val target = if (activeIndex == i) 1f else 0f
+        if (disableAnimations) {
+            target
+        } else {
+            animateFloatAsState(
+                targetValue = target,
+                animationSpec = spring(dampingRatio = TabBarMotion.Damping, stiffness = TabBarMotion.Stiffness),
+                label = "tab_expand_$i",
+            ).value
+        }
     }
     val weights = animFractions.map { lerp(1.0f, 1.85f, it) }
     val totalWeight = weights.sum().coerceAtLeast(1f)
@@ -228,7 +258,8 @@ fun LiquidPhoneTabBar(
         val lensWidth = with(density) { lensWidthPx.toDp() }
 
         if (useRealLiquid && liquidState != null && railState != null) {
-            // Acyclic optical capture plane for liquid lens
+            // A -> B -> C acyclic capture pipeline:
+            // B has light frost (1.5.dp) so lens C is clearer than the outer rail
             Box(
                 Modifier
                     .matchParentSize()
@@ -249,8 +280,8 @@ fun LiquidPhoneTabBar(
                 Box(
                     Modifier
                         .matchParentSize()
-                        .background(surfaceColor.copy(alpha = if (isDark) 0.65f else 0.75f), CircleShape)
-                        .navigationRail(liquidState, railTint, blurRadius = 26.dp),
+                        .background(surfaceColor, CircleShape)
+                        .navigationRail(liquidState, railTint, blurRadius = 1.5.dp),
                 )
                 PhoneNavigationGlyphs(
                     items = items,
@@ -260,16 +291,19 @@ fun LiquidPhoneTabBar(
                     active = activeInk,
                     captured = true,
                     onSelect = {},
+                    disableAnimations = disableAnimations,
                     modifier = Modifier.fillMaxSize().padding(4.dp),
                 )
             }
+            // A has an opaque theme background covering B's original draw, with 12.dp base frost
             Box(
                 Modifier
                     .matchParentSize()
-                    .background(surfaceColor.copy(alpha = if (isDark) 0.65f else 0.75f), CircleShape)
-                    .navigationRail(liquidState, railTint, blurRadius = 26.dp),
+                    .background(surfaceColor, CircleShape)
+                    .navigationRail(liquidState, railTint, blurRadius = 12.dp),
             )
         } else {
+            // Static / non-liquid fallback for unsupported / low-RAM devices
             Box(
                 Modifier
                     .matchParentSize()
@@ -277,7 +311,7 @@ fun LiquidPhoneTabBar(
                         shape = CircleShape,
                         hazeState = null,
                         isDark = isDark,
-                        blurRadius = 24.dp,
+                        blurRadius = 12.dp,
                         tintAlpha = if (isDark) 0.52f else 0.78f,
                         showBorder = false,
                         shadowElevation = 0.dp,
@@ -337,7 +371,7 @@ fun LiquidPhoneTabBar(
                                     if (dragged) {
                                         change.consume()
                                         val destination = logicalIndex(touchPosition, count, isRtl)
-                                        if (destination != selected) select(destination)
+                                        if (destination != selected) scrub(destination)
                                         haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                                     }
                                     break
@@ -360,27 +394,22 @@ fun LiquidPhoneTabBar(
                         .absoluteOffset { IntOffset(lensXPx.roundToInt(), 0) }
                         .width(lensWidth)
                         .fillMaxHeight()
+                        .graphicsLayer {
+                            val amount = lift.coerceIn(0f, 1f)
+                            scaleX = 1f + amount * 0.05f
+                            scaleY = scaleX
+                            shape = LensShape
+                            clip = false
+                            shadowElevation = 1.dp.toPx() + 2.dp.toPx() * amount
+                            ambientShadowColor = Color.Black.copy(alpha = 0.08f)
+                            spotShadowColor = Color.Black.copy(alpha = 0.12f)
+                        }
                         .clip(LensShape)
                         .background(
                             if (isDark) Color.White.copy(alpha = 0.12f) else Color.Black.copy(alpha = 0.06f),
                             LensShape,
                         )
-                        .drawBehind {
-                            val w = size.width
-                            val h = size.height
-                            val rimGlowAlpha = if (isDark) 0.10f else 0.20f
-                            drawRoundRect(
-                                brush = Brush.linearGradient(
-                                    0.00f to Color.White.copy(alpha = rimGlowAlpha),
-                                    0.30f to Color.White.copy(alpha = rimGlowAlpha * 0.35f),
-                                    0.60f to Color.Transparent,
-                                    1.00f to Color.Transparent,
-                                    start = Offset(0f, 0f),
-                                    end = Offset(w * 0.65f, h * 0.65f)
-                                ),
-                                cornerRadius = CornerRadius(h / 2f)
-                            )
-                        },
+                        .liquidBubbleHighlight(isDark) { 0.35f + 0.45f * lift.coerceIn(0f, 1f) },
                 )
             }
 
@@ -395,6 +424,7 @@ fun LiquidPhoneTabBar(
                     haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                     select(it)
                 },
+                disableAnimations = disableAnimations,
                 modifier = Modifier.fillMaxSize(),
             )
 
@@ -417,22 +447,7 @@ fun LiquidPhoneTabBar(
                             ambientShadowColor = Color.Black.copy(alpha = 0.08f)
                             spotShadowColor = Color.Black.copy(alpha = 0.16f)
                         }
-                        .drawBehind {
-                            val w = size.width
-                            val h = size.height
-                            val rimGlowAlpha = if (isDark) 0.10f else 0.20f
-                            drawRoundRect(
-                                brush = Brush.linearGradient(
-                                    0.00f to Color.White.copy(alpha = rimGlowAlpha),
-                                    0.30f to Color.White.copy(alpha = rimGlowAlpha * 0.35f),
-                                    0.60f to Color.Transparent,
-                                    1.00f to Color.Transparent,
-                                    start = Offset(0f, 0f),
-                                    end = Offset(w * 0.65f, h * 0.65f)
-                                ),
-                                cornerRadius = CornerRadius(h / 2f)
-                            )
-                        }
+                        .liquidBubbleHighlight(isDark) { 0.25f + 0.75f * lift.coerceIn(0f, 1f) }
                         .liquid(railState) {
                             val amount = lift.coerceIn(0f, 1f)
                             shape = LensShape
@@ -451,7 +466,7 @@ fun LiquidPhoneTabBar(
 }
 
 /**
- * Floating circular Liquid Glass button (used for iOS 26 Search pill and top-right Glass actions).
+ * Floating circular Liquid Glass button (used for iOS Search pill and top-right Glass actions).
  */
 @Composable
 fun LiquidCircularGlassButton(
@@ -471,7 +486,7 @@ fun LiquidCircularGlassButton(
     val pressScale by animateFloatAsState(
         targetValue = if (isPressed) 1.08f else 1f,
         animationSpec = spring(dampingRatio = 0.6f, stiffness = 550f),
-        label = "circlePressScale"
+        label = "circlePressScale",
     )
     val surfaceTint = if (isDark) Color(0xFF14161C).copy(alpha = 0.42f) else Color.White.copy(alpha = 0.64f)
 
@@ -520,14 +535,14 @@ fun LiquidCircularGlassButton(
                         0.60f to Color.Transparent,
                         1.00f to Color.Transparent,
                         start = Offset(0f, 0f),
-                        end = Offset(w * 0.65f, h * 0.65f)
-                    )
+                        end = Offset(w * 0.65f, h * 0.65f),
+                    ),
                 )
             }
             .clickable(
                 interactionSource = interactionSource,
                 indication = null,
-                onClick = onClick
+                onClick = onClick,
             ),
         contentAlignment = Alignment.Center,
     ) {
@@ -550,6 +565,7 @@ private fun PhoneNavigationGlyphs(
     captured: Boolean,
     onSelect: (Int) -> Unit,
     modifier: Modifier = Modifier,
+    disableAnimations: Boolean = LocalDisableAnimations.current,
 ) {
     val activeIndex = captionIndex.coerceIn(items.indices)
     Row(modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
@@ -616,14 +632,22 @@ private fun PhoneNavigationGlyphs(
                     if (item.label.isNotBlank()) {
                         AnimatedVisibility(
                             visible = isSelected,
-                            enter = fadeIn(animationSpec = tween(120, delayMillis = 40)) + expandHorizontally(
-                                animationSpec = tween(200, easing = FastOutSlowInEasing),
-                                expandFrom = Alignment.Start,
-                            ),
-                            exit = fadeOut(animationSpec = tween(80)) + shrinkHorizontally(
-                                animationSpec = tween(160),
-                                shrinkTowards = Alignment.Start,
-                            ),
+                            enter = if (disableAnimations) {
+                                fadeIn(animationSpec = snap())
+                            } else {
+                                fadeIn(animationSpec = tween(150)) + expandHorizontally(
+                                    animationSpec = spring(dampingRatio = 0.8f, stiffness = 400f),
+                                    expandFrom = Alignment.Start,
+                                )
+                            },
+                            exit = if (disableAnimations) {
+                                fadeOut(animationSpec = snap())
+                            } else {
+                                fadeOut(animationSpec = tween(100)) + shrinkHorizontally(
+                                    animationSpec = spring(dampingRatio = 0.8f, stiffness = 400f),
+                                    shrinkTowards = Alignment.Start,
+                                )
+                            },
                         ) {
                             Row(
                                 modifier = textSemantics,
@@ -634,6 +658,7 @@ private fun PhoneNavigationGlyphs(
                                     text = item.label,
                                     tint = tint,
                                     captured = captured,
+                                    disableAnimations = disableAnimations,
                                 )
                             }
                         }
@@ -650,6 +675,7 @@ private fun StaggeredLabelReveal(
     tint: Color,
     captured: Boolean,
     modifier: Modifier = Modifier,
+    disableAnimations: Boolean = false,
 ) {
     Text(
         text = text,
@@ -691,6 +717,9 @@ private fun visualIndex(index: Int, itemCount: Int, isRtl: Boolean): Float {
     return (if (isRtl) itemCount - 1 - logicalIndex else logicalIndex).toFloat()
 }
 
+private fun railTint(isDark: Boolean): Color =
+    if (isDark) Color(0xFF14161F).copy(alpha = 0.35f) else Color.White.copy(alpha = 0.32f)
+
 private fun Modifier.railShadow(): Modifier = shadow(
     elevation = 8.dp,
     shape = CircleShape,
@@ -707,14 +736,17 @@ private fun Modifier.captureHeadroom(padding: Dp): Modifier = layout { measurabl
     layout(width, height) { placeable.place(-inset, -inset) }
 }
 
-private fun Modifier.navigationRail(state: LiquidState, color: Color, blurRadius: Dp = 26.dp): Modifier =
-    liquid(state) {
-        shape = CircleShape
-        frost = blurRadius
-        refraction = 0.07f
-        curve = 0.12f
-        edge = 0.012f
-        saturation = 1.10f
-        dispersion = 0f
-        tint = color
-    }
+private fun Modifier.navigationRail(
+    state: LiquidState,
+    color: Color,
+    blurRadius: Dp = 12.dp,
+): Modifier = liquid(state) {
+    shape = CircleShape
+    frost = blurRadius
+    refraction = 0.07f
+    curve = 0.12f
+    edge = 0.012f
+    saturation = 1.10f
+    dispersion = 0f
+    tint = color
+}

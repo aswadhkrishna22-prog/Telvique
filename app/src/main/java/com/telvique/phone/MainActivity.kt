@@ -1,6 +1,7 @@
 package com.telvique.phone
 
 import android.app.Activity
+import android.app.ActivityManager
 import android.app.role.RoleManager
 import android.content.Intent
 import android.os.Build
@@ -14,6 +15,9 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.EaseOut
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -54,6 +58,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -62,6 +67,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.util.lerp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.telvique.phone.data.PhoneLayoutMode
 import com.telvique.phone.telecom.CallManager
@@ -263,7 +269,11 @@ private fun TelviqueMainRoot(
 
     val ongoingCall = telecomState.primaryCall?.takeIf { it.phase != CallPhase.DISCONNECTED }
     val appBackground = palette.background
-    val useLiquidNav = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+    val isLowRam = remember(context) {
+        val am = runCatching { context.getSystemService(ActivityManager::class.java) }.getOrNull()
+        am?.isLowRamDevice == true
+    }
+    val useLiquidNav = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !isLowRam
     val navLiquidState = if (useLiquidNav) rememberLiquidState() else null
 
     val navBarBottomDp = with(LocalDensity.current) { WindowInsets.navigationBars.getBottom(this).toDp() }
@@ -545,21 +555,34 @@ private fun TelviqueMainRoot(
             }
 
             // Floating iOS 26 Liquid Glass Bottom Navigation Bar (sibling to content plane!)
-            AnimatedVisibility(
-                visible = barVisible && !showUnifiedSettings && !showUnifiedSearch,
-                enter = slideInVertically(
-                    animationSpec = tween(durationMillis = 220),
-                    initialOffsetY = { it }
-                ) + fadeIn(animationSpec = tween(durationMillis = 220)),
-                exit = slideOutVertically(
-                    animationSpec = tween(durationMillis = 220),
-                    targetOffsetY = { it }
-                ) + fadeOut(animationSpec = tween(durationMillis = 220)),
+            val isBarVisible = barVisible && !showUnifiedSettings && !showUnifiedSearch
+            val animatedVisibilityFactor by animateFloatAsState(
+                targetValue = if (isBarVisible) 1f else 0f,
+                animationSpec = if (isLowRam) {
+                    snap()
+                } else {
+                    tween(
+                        durationMillis = 280,
+                        easing = EaseOut,
+                    )
+                },
+                label = "FloatingPhoneTabBarVisibility",
+            )
+            val baseScale = lerp(0.88f, 1.0f, animatedVisibilityFactor)
+            val hideOffsetY = with(LocalDensity.current) { 90.dp.toPx() } * (1f - animatedVisibilityFactor)
+
+            Box(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .fillMaxWidth()
                     .navigationBarsPadding()
                     .padding(horizontal = 16.dp, vertical = 12.dp)
+                    .graphicsLayer {
+                        translationY = hideOffsetY
+                        scaleX = baseScale
+                        scaleY = baseScale
+                        alpha = animatedVisibilityFactor
+                    },
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -588,6 +611,7 @@ private fun TelviqueMainRoot(
                             },
                             isDark = palette.isDark,
                             maxWidthDp = 340.dp,
+                            disableAnimations = isLowRam,
                             modifier = Modifier.weight(1f, fill = false)
                         )
                     } else {
@@ -614,6 +638,7 @@ private fun TelviqueMainRoot(
                             },
                             isDark = palette.isDark,
                             maxWidthDp = 368.dp,
+                            disableAnimations = isLowRam,
                         )
                     }
                 }
