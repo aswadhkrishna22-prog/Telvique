@@ -1,3 +1,5 @@
+@file:OptIn(dev.chrisbanes.haze.ExperimentalHazeApi::class)
+
 package com.telvique.phone.ui.dialer
 
 import android.graphics.RenderEffect
@@ -72,15 +74,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
-import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asComposeRenderEffect
-import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.layer.drawLayer
-import androidx.compose.ui.graphics.rememberGraphicsLayer
-import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -123,6 +120,13 @@ import com.telvique.phone.ui.glass.isBackdropGlassCapable
 import com.telvique.phone.ui.glass.liquidBubbleHighlight
 import com.telvique.phone.ui.icons.ApplePhoneIcons
 import com.telvique.phone.ui.theme.LocalApplePalette
+import dev.chrisbanes.haze.HazeInput
+import dev.chrisbanes.haze.HazePerformanceMode
+import dev.chrisbanes.haze.HazeState
+import dev.chrisbanes.haze.blur.HazeBlurStyle
+import dev.chrisbanes.haze.blur.HazeColorEffect
+import dev.chrisbanes.haze.blur.hazeBlur
+import dev.chrisbanes.haze.hazeSource
 
 // ── KEYPAD BACKDROP BLUR & LIQUID GLASS TUNING CONSTANTS ───────────────────────
 const val KEYPAD_BACKDROP_BLUR_RADIUS_DP = 25f // Strong blur radius for Layer B (~25dp)
@@ -312,8 +316,7 @@ fun DialerScreen(
     val clipboard = LocalClipboardManager.current
 
     val listState = rememberLazyListState()
-    val listGraphicsLayer = rememberGraphicsLayer()
-    val layerBGraphicsLayer = rememberGraphicsLayer()
+    val hazeState = remember { HazeState() }
 
     var keypadPanelHeightPx by remember { mutableIntStateOf(0) }
     var topBarHeightPx by remember { mutableIntStateOf(0) }
@@ -367,22 +370,7 @@ fun DialerScreen(
         }
     }
 
-    val isBlurCapable = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && isBackdropGlassCapable()
-    val isLiquidShaderCapable = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && isBlurCapable
-
-    if (isBlurCapable) {
-        val blurPx = with(density) { KEYPAD_BACKDROP_BLUR_RADIUS_DP.dp.toPx() }
-        layerBGraphicsLayer.renderEffect = remember(blurPx) {
-            RenderEffect.createBlurEffect(
-                blurPx,
-                blurPx,
-                Shader.TileMode.CLAMP
-            ).asComposeRenderEffect()
-        }
-    } else {
-        layerBGraphicsLayer.renderEffect = null
-    }
-
+    val isLiquidShaderCapable = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && isBackdropGlassCapable()
     val fallbackPanelColor = palette.background.copy(alpha = 0.94f)
 
     val statusTopDp = with(density) { WindowInsets.statusBars.getTop(this).toDp() }
@@ -404,7 +392,7 @@ fun DialerScreen(
             .fillMaxSize()
             .background(palette.background)
     ) {
-        // Layer 0: Scrollable Recents / T9 Match list captured into offscreen graphics layer
+        // Scrollable Recents / T9 Match list registered as Haze blur source
         // Extends underneath the keypad when input is empty;
         // Ends above the number display when input is not empty.
         LazyColumn(
@@ -412,13 +400,8 @@ fun DialerScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(bottom = listBottomPaddingDp)
-                .background(palette.background)
-                .drawWithContent {
-                    listGraphicsLayer.record {
-                        this@drawWithContent.drawContent()
-                    }
-                    drawLayer(listGraphicsLayer)
-                },
+                .hazeSource(hazeState)
+                .background(palette.background),
             contentPadding = PaddingValues(
                 top = topBarReservedHeightDp + 10.dp,
                 bottom = if (input.isNotEmpty()) 24.dp else listBottomContentPadding
@@ -642,8 +625,29 @@ fun DialerScreen(
             val glassHeightPx = (keypadPanelHeightPx - glassTopOffsetPx).coerceAtLeast(0f)
             val glassTopInRootPx = panelTopInRootPx + glassTopOffsetPx
 
-            // ── LAYER B: BLURRED COPY OF CALL LIST CLIPPED ONLY TO KEYPAD REGION ──
+            // ── HAZE BACKDROP BLUR OVER KEYPAD REGION (WITH TOP FADE & LIQUID GLASS KEY SHADER) ──
             if (glassHeightPx > 0f) {
+                val isAndroid12OrAbove = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+                val keypadHazeStyle = remember {
+                    val darkTintEffect = HazeColorEffect.tint(Color.Black.copy(alpha = KEYPAD_BACKDROP_DARK_TINT))
+                    HazeBlurStyle {
+                        blurEnabled(true)
+                        backgroundColor(Color.Transparent)
+                        colorEffects(listOf(darkTintEffect))
+                        fallbackColorEffect(darkTintEffect)
+                        blurRadius(KEYPAD_BACKDROP_BLUR_RADIUS_DP.dp)
+                        noiseFactor(0.01f)
+                        mask(
+                            Brush.verticalGradient(
+                                0.00f to Color.Transparent,
+                                0.06f to Color.Black.copy(alpha = 0.50f),
+                                0.14f to Color.Black,
+                                1.00f to Color.Black
+                            )
+                        )
+                    }
+                }
+
                 val keyRadiusPx = with(density) { 38.dp.toPx() }
                 val fadeTopPx = with(density) { KEYPAD_FADE_TOP_DP.dp.toPx() }
                 val keyCentersArray = remember(panelWidthPx, density) { FloatArray(24) }
@@ -674,108 +678,64 @@ fun DialerScreen(
                     }
                 }
 
-                if (isLiquidShaderCapable) {
-                    // API 33+: Liquid Glass AGSL Shader sampling Layer B (the blurred copy of the list)
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(with(density) { glassHeightPx.toDp() })
-                            .align(Alignment.BottomCenter)
-                            .clipToBounds()
-                            .graphicsLayer {
-                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && size.width > 0f && size.height > 0f) {
-                                    val shader = KeypadLiquidGlassShader.getOrCreateShader()
-                                    if (shader != null) {
-                                        shader.setFloatUniform("uSize", size.width, size.height)
-                                        shader.setFloatUniform("uKeyRadius", keyRadiusPx)
-                                        shader.setFloatUniform("uKeyCenters", keyCentersArray)
-                                        shader.setFloatUniform("uRefraction", KEYPAD_REFRACTION_STRENGTH)
-                                        shader.setFloatUniform("uDispersion", KEYPAD_DISPERSION_STRENGTH)
-                                        shader.setFloatUniform("uSpecular", KEYPAD_SPECULAR_STRENGTH)
-                                        shader.setFloatUniform("uFadeTopPx", fadeTopPx)
-                                        shader.setFloatUniform("uDarkTheme", if (palette.isDark) 1f else 0f)
-                                        shader.setFloatUniform("uDarkTint", KEYPAD_BACKDROP_DARK_TINT)
-                                        shader.setFloatUniform("uPressedIndex", pressedKeyIndex.toFloat())
-                                        shader.setFloatUniform("uPressedProgress", pressedKeyProgress)
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(with(density) { glassHeightPx.toDp() })
+                        .align(Alignment.BottomCenter)
+                        .clipToBounds()
+                        .then(
+                            if (isAndroid12OrAbove) {
+                                Modifier.hazeBlur(
+                                    input = HazeInput.Sources(hazeState),
+                                    style = keypadHazeStyle,
+                                    performanceMode = HazePerformanceMode.Fixed(0.5f)
+                                )
+                            } else {
+                                Modifier.background(
+                                    Brush.verticalGradient(
+                                        0.00f to Color.Transparent,
+                                        0.06f to Color.Black.copy(alpha = KEYPAD_FALLBACK_DARK_TINT * 0.5f),
+                                        0.14f to Color.Black.copy(alpha = KEYPAD_FALLBACK_DARK_TINT),
+                                        1.00f to Color.Black.copy(alpha = KEYPAD_FALLBACK_DARK_TINT)
+                                    )
+                                )
+                            }
+                        )
+                        .then(
+                            if (isLiquidShaderCapable) {
+                                Modifier.graphicsLayer {
+                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && size.width > 0f && size.height > 0f) {
+                                        val shader = KeypadLiquidGlassShader.getOrCreateShader()
+                                        if (shader != null) {
+                                            shader.setFloatUniform("uSize", size.width, size.height)
+                                            shader.setFloatUniform("uKeyRadius", keyRadiusPx)
+                                            shader.setFloatUniform("uKeyCenters", keyCentersArray)
+                                            shader.setFloatUniform("uRefraction", KEYPAD_REFRACTION_STRENGTH)
+                                            shader.setFloatUniform("uDispersion", KEYPAD_DISPERSION_STRENGTH)
+                                            shader.setFloatUniform("uSpecular", KEYPAD_SPECULAR_STRENGTH)
+                                            shader.setFloatUniform("uFadeTopPx", fadeTopPx)
+                                            shader.setFloatUniform("uDarkTheme", if (palette.isDark) 1f else 0f)
+                                            shader.setFloatUniform("uDarkTint", 0f)
+                                            shader.setFloatUniform("uPressedIndex", pressedKeyIndex.toFloat())
+                                            shader.setFloatUniform("uPressedProgress", pressedKeyProgress)
 
-                                        renderEffect = RenderEffect.createRuntimeShaderEffect(
-                                            shader,
-                                            "content"
-                                        ).asComposeRenderEffect()
+                                            renderEffect = RenderEffect.createRuntimeShaderEffect(
+                                                shader,
+                                                "content"
+                                            ).asComposeRenderEffect()
+                                        } else {
+                                            renderEffect = null
+                                        }
                                     } else {
                                         renderEffect = null
                                     }
-                                } else {
-                                    renderEffect = null
                                 }
+                            } else {
+                                Modifier
                             }
-                    ) {
-                        Canvas(modifier = Modifier.matchParentSize()) {
-                            if (listGraphicsLayer.size != IntSize.Zero) {
-                                layerBGraphicsLayer.record {
-                                    translate(left = 0f, top = -glassTopInRootPx) {
-                                        drawLayer(listGraphicsLayer)
-                                    }
-                                }
-                                drawLayer(layerBGraphicsLayer)
-                            }
-                        }
-                    }
-                } else if (isBlurCapable) {
-                    // API 31-32: RenderEffect blur supported, AGSL RuntimeShader not available.
-                    // Draw Layer B (blurred list) directly with 30% dark tint and top fade gradient.
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(with(density) { glassHeightPx.toDp() })
-                            .align(Alignment.BottomCenter)
-                            .clipToBounds()
-                    ) {
-                        Canvas(modifier = Modifier.matchParentSize()) {
-                            if (listGraphicsLayer.size != IntSize.Zero) {
-                                layerBGraphicsLayer.record {
-                                    translate(left = 0f, top = -glassTopInRootPx) {
-                                        drawLayer(listGraphicsLayer)
-                                    }
-                                }
-                                drawLayer(layerBGraphicsLayer)
-                            }
-                        }
-                        val tintColor = if (palette.isDark) Color.Black else Color(0xFF14161F)
-                        Box(
-                            modifier = Modifier
-                                .matchParentSize()
-                                .background(
-                                    Brush.verticalGradient(
-                                        0.00f to Color.Transparent,
-                                        0.08f to tintColor.copy(alpha = KEYPAD_BACKDROP_DARK_TINT * 0.5f),
-                                        0.16f to tintColor.copy(alpha = KEYPAD_BACKDROP_DARK_TINT),
-                                        1.00f to tintColor.copy(alpha = KEYPAD_BACKDROP_DARK_TINT)
-                                    )
-                                )
                         )
-                    }
-                } else {
-                    // API < 31 fallback: no blur supported.
-                    // Draw dark tint at about 80% opacity with top fade gradient so call list is illegible.
-                    val fallbackDarkColor = if (palette.isDark) Color.Black else Color(0xFF14161F)
-                    val fallbackGradient = remember(fallbackDarkColor) {
-                        Brush.verticalGradient(
-                            0.00f to Color.Transparent,
-                            0.08f to fallbackDarkColor.copy(alpha = KEYPAD_FALLBACK_DARK_TINT * 0.5f),
-                            0.16f to fallbackDarkColor.copy(alpha = KEYPAD_FALLBACK_DARK_TINT),
-                            1.00f to fallbackDarkColor.copy(alpha = KEYPAD_FALLBACK_DARK_TINT)
-                        )
-                    }
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(with(density) { glassHeightPx.toDp() })
-                            .align(Alignment.BottomCenter)
-                            .clipToBounds()
-                            .background(fallbackGradient)
-                    )
-                }
+                )
             }
 
             // Keypad foreground controls (keys, digits, and letters sit ABOVE the glass layer)
