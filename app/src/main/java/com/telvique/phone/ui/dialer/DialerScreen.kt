@@ -133,21 +133,18 @@ import dev.chrisbanes.haze.blur.hazeBlur
 import dev.chrisbanes.haze.hazeSource
 
 // ── KEYPAD BACKDROP BLUR & LIQUID GLASS TUNING CONSTANTS ───────────────────────
-const val KEYPAD_GLASS_TOP_OFFSET_DP = 140f // Blur ramp starts 140dp above key row 1 (no straight boundary)
-const val KEYPAD_RAMP_DISTANCE_DP = 140f // Full ramp transition distance (140dp)
+const val KEYPAD_GLASS_TOP_OFFSET_DP = 36f // Soft blur region begins 36dp above key row 1 (invisible at its very top)
+const val KEYPAD_RAMP_DISTANCE_DP = 36f // Same as offset (kept in sync)
 const val KEYPAD_BACKDROP_BLUR_RADIUS_DP = 56f // Max blur radius (~56dp) at full intensity (48-64dp tunable)
 const val KEYPAD_BACKDROP_DARK_TINT = 0.28f // Max dark tint over backdrop (~28% black, 25-30% tunable)
 const val KEYPAD_BACKDROP_NOISE_FACTOR = 0.06f // Low noise (0.05-0.10) for glass-grain feel
 const val KEYPAD_BACKDROP_INPUT_SCALE = 0.5f // Downscale input content to half-resolution for 60fps performance
 const val KEYPAD_FALLBACK_DARK_TINT = 0.80f // Fallback tint opacity for API < 31 (~80% opacity)
 
-// Multi-stop progressive curve: 0 at top, stays below 0.15 for first third of ramp, rising to 1.0 at bottom
-const val KEYPAD_INTENSITY_STOP_0 = 0.00f // at 0.00 (top of ramp: 140dp above row 1, zero blur & zero tint)
-const val KEYPAD_INTENSITY_STOP_1 = 0.03f // at 0.08 (first third of ramp zone: well below 0.15)
-const val KEYPAD_INTENSITY_STOP_2 = 0.12f // at 0.16 (two-thirds of ramp zone)
-const val KEYPAD_INTENSITY_STOP_3 = 0.35f // at 0.26 (key row 1 top edge)
-const val KEYPAD_INTENSITY_STOP_4 = 0.70f // at 0.55 (key row 3/4)
-const val KEYPAD_INTENSITY_STOP_5 = 1.00f // at 1.00 (call button & bottom nav)
+// Soft progressive curve, positions in dp relative to top edge of key row 1 (negative = above it).
+// Blur becomes visible ~4dp above key "1" and then keeps increasing smoothly (no hard edge).
+val KEYPAD_CURVE_DP = floatArrayOf(-36f, -20f, -4f, 20f, 100f)
+val KEYPAD_CURVE_INTENSITY = floatArrayOf(0.00f, 0.04f, 0.25f, 0.50f, 0.80f) // reaches 1.00 at bottom
 
 // Row alpha fade in ramp zone: 100% (1.0f) at start of ramp down to 55% (0.55f) at key row 1
 const val KEYPAD_ROW_ALPHA_START = 1.00f
@@ -161,6 +158,7 @@ const val KEYPAD_DISPERSION_STRENGTH = 0.012f // Low strength chromatic dispersi
 const val KEYPAD_REFRACTION_STRENGTH = 0.18f // Low strength rim-only lens refraction
 const val KEYPAD_SPECULAR_STRENGTH = 0.22f // Dim top-left rim highlight intensity (no center spot)
 const val KEYPAD_FADE_TOP_DP = 6f // Short fade-in gradient at the top of the glass region
+const val KEYPAD_FROST_STRENGTH = 1.0f // Premium frosted-glass look (vibrancy + grain + soft sheen). 0 = off, 1 = default, 1.5 = stronger
 
 // ── AGSL RUNTIME SHADER (LIQUID GLASS REFRACTION, CHROMATIC DISPERSION & SPECULAR) ──
 private const val KEYPAD_LIQUID_GLASS_SHADER_SRC = """
@@ -176,10 +174,44 @@ private const val KEYPAD_LIQUID_GLASS_SHADER_SRC = """
     uniform float uDarkTint;
     uniform float uPressedIndex;
     uniform float uPressedProgress;
+    uniform float uKeyTopY;
+    uniform float uDp;
+    uniform float uFrost;
+
+    float hash21(float2 q) {
+        return fract(sin(dot(q, float2(12.9898, 78.233))) * 43758.5453);
+    }
+
+    // Frosted-glass treatment for the blurred backdrop: vibrancy (saturation + lift), fine grain,
+    // a soft top-lit sheen and a wide glow band just above key row 1. All scaled by a smooth ramp
+    // (0 well above the keys), so there is never a hard edge.
+    half4 frostGlass(half4 c, float2 p) {
+        float f = smoothstep(uKeyTopY - 30.0 * uDp, uKeyTopY + 60.0 * uDp, p.y) * uFrost;
+        half a = c.a;
+        half3 rgb = (a > 0.004) ? (c.rgb / a) : half3(0.0);
+
+        half lum = dot(rgb, half3(0.2126, 0.7152, 0.0722));
+        rgb = mix(half3(lum), rgb, half(1.0 + 0.35 * f));
+        rgb = rgb * half(1.0 + 0.10 * f);
+
+        float n = hash21(p) - 0.5;
+        rgb += half3(half(n * 0.035 * f));
+        rgb = clamp(rgb, half3(0.0), half3(1.0));
+
+        half3 prem = rgb * a;
+
+        float band = exp(-pow((p.y - (uKeyTopY - 4.0 * uDp)) / (11.0 * uDp), 2.0));
+        float topLight = 0.035 * f * (1.0 - clamp(p.y / uSize.y, 0.0, 1.0));
+        float themeScale = (uDarkTheme > 0.5) ? 1.0 : 0.5;
+        float s = clamp((0.055 * band * uFrost + topLight) * themeScale, 0.0, 1.0);
+        prem = prem * half(1.0 - s) + half3(half(s));
+        a = a * half(1.0 - s) + half(s);
+        return half4(prem, a);
+    }
 
     half4 main(float2 p) {
         float2 clampedP = clamp(p, float2(0.0), uSize - float2(1.0));
-        half4 bgSample = content.eval(clampedP);
+        half4 bgSample = frostGlass(content.eval(clampedP), p);
 
         // 1. Find closest key among the 12 keys using circle SDF
         float minSdf = 10000.0;
@@ -207,34 +239,51 @@ private const val KEYPAD_LIQUID_GLASS_SHADER_SRC = """
             return bgSample;
         }
 
-        // 2. Inside key: Liquid Glass Lens Refraction (rim-only bending) & Chromatic Dispersion
+        // 2. Inside key: Full convex optical lens (centre magnification + rim bending)
         float r = closestDist;
         float R = uKeyRadius;
         float rNorm = clamp(r / R, 0.0, 1.0);
         float2 dir = (r > 0.001) ? ((p - closestCenter) / r) : float2(0.0, 0.0);
 
-        // Rim-only bending of the blurred backdrop (no center distortion/magnification)
-        float rimFactor = smoothstep(0.55, 1.0, rNorm);
-        float rimBend = uRefraction * 0.35 * rimFactor;
-        float totalOffset = -rimBend * R;
-        float2 pRefract = p + dir * totalOffset;
+        // Dome profile: f(t) = sqrt(1 - t^2) gives genuine spherical curvature
+        float domeZ     = sqrt(max(0.0, 1.0 - rNorm * rNorm));          // 1 at centre, 0 at rim
+        float domeTaper = 1.0 - domeZ;                                   // 0 at centre, 1 at rim
+        // Centre magnification: pixels inward toward the centre, fading toward rim
+        float magStrength   = uRefraction * 0.52 * domeZ * domeZ;
+        float2 pMag         = p - dir * (magStrength * R);
+        // Rim bending: Snell's-law gradient bending outward at the glass edge
+        float rimFactor     = smoothstep(0.55, 1.0, rNorm);
+        float rimBend       = uRefraction * 0.28 * rimFactor;
+        float2 pRefract     = pMag + dir * (rimBend * R);
 
-        // Dispersion strictly at the rim at low strength
-        float disp = uDispersion * pow(rNorm, 4.0) * R;
+        // Chromatic dispersion: separate R/G/B sample points; stronger at rim
+        float disp  = uDispersion * pow(rNorm, 3.5) * R;
         float2 coordR = clamp(pRefract - dir * disp, float2(0.0), uSize - float2(1.0));
-        float2 coordG = clamp(pRefract, float2(0.0), uSize - float2(1.0));
+        float2 coordG = clamp(pRefract,              float2(0.0), uSize - float2(1.0));
         float2 coordB = clamp(pRefract + dir * disp, float2(0.0), uSize - float2(1.0));
 
         half rChannel = content.eval(coordR).r;
         half gChannel = content.eval(coordG).g;
         half bChannel = content.eval(coordB).b;
         half aChannel = content.eval(coordG).a;
-        half3 keyRefract = half3(rChannel, gChannel, bChannel);
+        half4 keyBase = frostGlass(half4(rChannel, gChannel, bChannel, aChannel), p);
+        half3 keyRefract = keyBase.rgb;
+        aChannel = keyBase.a;
 
-        // 3. Thin soft rim sheen along top-left (dim gradient, no center spot)
+        // 3. Specular lighting: directional top-left rim + convex dome hotspot
         float angleToLight = dot(dir, float2(-0.7071, -0.7071));
-        float rimSheen = max(0.0, angleToLight) * pow(rNorm, 3.0) * 0.35;
-        float totalSpec = rimSheen * uSpecular;
+        // Rim sheen fades from rim to centre
+        float rimSheen   = max(0.0, angleToLight) * pow(rNorm, 2.5) * 0.30;
+        // Dome highlight: a Phong-style specular at the top-left of the dome
+        float domeSpec   = pow(max(0.0, dot(float2(-0.7071, -0.7071) - dir * domeZ, float2(0.0, -1.0))), 6.0)
+                           * domeZ * 0.18;
+        float totalSpec  = (rimSheen + domeSpec) * uSpecular;
+
+        // Crisp thin glass edge (brighter toward the light) + soft top inner glow
+        float ring  = smoothstep(-2.5, -0.8, minSdf) * (1.0 - smoothstep(-0.8, 0.6, minSdf));
+        totalSpec  += ring * (0.10 + 0.32 * max(0.0, angleToLight)) * uFrost;
+        float vy    = (p.y - closestCenter.y) / R;
+        totalSpec  += 0.05 * clamp(-vy, 0.0, 1.0) * (1.0 - 0.55 * rNorm) * uFrost;
 
         // 4. Flat base glass tint (translucent white 13-16%)
         half3 baseKeyTint = half3(1.0, 1.0, 1.0);
@@ -645,7 +694,7 @@ fun DialerScreen(
                     keypadPanelHeightPx = coords.size.height
                 }
         ) {
-            // Glass region starts 140dp above the top edge of key row 1 (no straight boundary)
+            // Glass region starts KEYPAD_GLASS_TOP_OFFSET_DP above the top edge of key row 1 (soft feather, no straight boundary)
             val glassTopOffsetPx = maxOf(0f, keyGridTopInPanelPx - with(density) { KEYPAD_GLASS_TOP_OFFSET_DP.dp.toPx() })
             val glassHeightPx = (keypadPanelHeightPx - glassTopOffsetPx).coerceAtLeast(0f)
             val glassTopInRootPx = panelTopInRootPx + glassTopOffsetPx
@@ -653,25 +702,26 @@ fun DialerScreen(
             // ── HAZE BACKDROP BLUR OVER KEYPAD REGION (WITH PROGRESSIVE FADE & LIQUID GLASS KEY SHADER) ──
             if (glassHeightPx > 0f) {
                 val isAndroid12OrAbove = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
-                val progressiveBrush = remember {
-                    Brush.verticalGradient(
-                        0.00f to Color.Black.copy(alpha = KEYPAD_INTENSITY_STOP_0),
-                        0.08f to Color.Black.copy(alpha = KEYPAD_INTENSITY_STOP_1),
-                        0.16f to Color.Black.copy(alpha = KEYPAD_INTENSITY_STOP_2),
-                        0.26f to Color.Black.copy(alpha = KEYPAD_INTENSITY_STOP_3),
-                        0.55f to Color.Black.copy(alpha = KEYPAD_INTENSITY_STOP_4),
-                        1.00f to Color.Black.copy(alpha = KEYPAD_INTENSITY_STOP_5)
-                    )
+                // Soft progressive intensity (no straight boundary). Positions are measured from the top of the
+                // glass region, which sits KEYPAD_GLASS_TOP_OFFSET_DP above key row 1.
+                val curveStops = remember(glassHeightPx, density.density) {
+                    val offsetPx = with(density) { KEYPAD_GLASS_TOP_OFFSET_DP.dp.toPx() }
+                    val list = ArrayList<Pair<Float, Float>>()
+                    for (i in KEYPAD_CURVE_DP.indices) {
+                        val frac = ((offsetPx + with(density) { KEYPAD_CURVE_DP[i].dp.toPx() }) / glassHeightPx).coerceIn(0f, 1f)
+                        list.add(frac to KEYPAD_CURVE_INTENSITY[i])
+                    }
+                    list.add(1f to 1f)
+                    list
                 }
-                val tintScrimBrush = remember {
-                    Brush.verticalGradient(
-                        0.00f to Color.Black.copy(alpha = KEYPAD_BACKDROP_DARK_TINT * KEYPAD_INTENSITY_STOP_0),
-                        0.08f to Color.Black.copy(alpha = KEYPAD_BACKDROP_DARK_TINT * KEYPAD_INTENSITY_STOP_1),
-                        0.16f to Color.Black.copy(alpha = KEYPAD_BACKDROP_DARK_TINT * KEYPAD_INTENSITY_STOP_2),
-                        0.26f to Color.Black.copy(alpha = KEYPAD_BACKDROP_DARK_TINT * KEYPAD_INTENSITY_STOP_3),
-                        0.55f to Color.Black.copy(alpha = KEYPAD_BACKDROP_DARK_TINT * KEYPAD_INTENSITY_STOP_4),
-                        1.00f to Color.Black.copy(alpha = KEYPAD_BACKDROP_DARK_TINT * KEYPAD_INTENSITY_STOP_5)
-                    )
+                val progressiveBrush = remember(curveStops) {
+                    Brush.verticalGradient(*curveStops.map { it.first to Color.Black.copy(alpha = it.second) }.toTypedArray())
+                }
+                val tintScrimBrush = remember(curveStops) {
+                    Brush.verticalGradient(*curveStops.map { it.first to Color.Black.copy(alpha = KEYPAD_BACKDROP_DARK_TINT * it.second) }.toTypedArray())
+                }
+                val fallbackBrush = remember(curveStops) {
+                    Brush.verticalGradient(*curveStops.map { it.first to Color.Black.copy(alpha = KEYPAD_FALLBACK_DARK_TINT * it.second) }.toTypedArray())
                 }
                 val keypadHazeStyle = remember(progressiveBrush) {
                     HazeBlurStyle {
@@ -684,6 +734,8 @@ fun DialerScreen(
                 }
 
                 val keyRadiusPx = with(density) { 38.dp.toPx() }
+                val keyTopInGlassPx = keyGridTopInPanelPx - glassTopOffsetPx
+                val glassDensityPx = density.density
                 val keyCentersArray = remember(panelWidthPx, density) { FloatArray(24) }
 
                 // Compute exact center coordinates of all 12 keys relative to the glass region
@@ -728,16 +780,7 @@ fun DialerScreen(
                                     )
                                     .background(tintScrimBrush)
                             } else {
-                                Modifier.background(
-                                    Brush.verticalGradient(
-                                        0.00f to Color.Black.copy(alpha = KEYPAD_FALLBACK_DARK_TINT * KEYPAD_INTENSITY_STOP_0),
-                                        0.08f to Color.Black.copy(alpha = KEYPAD_FALLBACK_DARK_TINT * KEYPAD_INTENSITY_STOP_1),
-                                        0.16f to Color.Black.copy(alpha = KEYPAD_FALLBACK_DARK_TINT * KEYPAD_INTENSITY_STOP_2),
-                                        0.26f to Color.Black.copy(alpha = KEYPAD_FALLBACK_DARK_TINT * KEYPAD_INTENSITY_STOP_3),
-                                        0.55f to Color.Black.copy(alpha = KEYPAD_FALLBACK_DARK_TINT * KEYPAD_INTENSITY_STOP_4),
-                                        1.00f to Color.Black.copy(alpha = KEYPAD_FALLBACK_DARK_TINT * KEYPAD_INTENSITY_STOP_5)
-                                    )
-                                )
+                                Modifier.background(fallbackBrush)
                             }
                         )
                         .then(
@@ -757,6 +800,9 @@ fun DialerScreen(
                                             shader.setFloatUniform("uDarkTint", 0f)
                                             shader.setFloatUniform("uPressedIndex", pressedKeyIndex.toFloat())
                                             shader.setFloatUniform("uPressedProgress", pressedKeyProgress)
+                                            shader.setFloatUniform("uKeyTopY", keyTopInGlassPx)
+                                            shader.setFloatUniform("uDp", glassDensityPx)
+                                            shader.setFloatUniform("uFrost", KEYPAD_FROST_STRENGTH)
 
                                             renderEffect = RenderEffect.createRuntimeShaderEffect(
                                                 shader,
@@ -1743,32 +1789,28 @@ private fun AppleLiquidDialKey(
                 scaleY = scale
             }
             .clip(CircleShape)
-            .drawBehind {
-                val w = size.width
-                val h = size.height
-
-                // 1. Translucent fill with flat / subtle top-to-bottom change (6-9% white alpha in dark mode)
-                drawCircle(
-                    brush = Brush.verticalGradient(
-                        colors = listOf(topFill, bottomFill),
-                        startY = 0f,
-                        endY = h
-                    )
-                )
-
-                // 2. Thin soft rim highlight along top-left edge as a dim gradient (no bulky center sphere spot, no stroke)
-                val rimAlpha = (if (palette.isDark) KEYPAD_SPECULAR_STRENGTH else 0.30f) + 0.06f * pressProgress
-                drawCircle(
-                    brush = Brush.linearGradient(
-                        colors = listOf(
-                            Color.White.copy(alpha = rimAlpha),
-                            Color.White.copy(alpha = rimAlpha * 0.25f),
-                            Color.Transparent
-                        ),
-                        start = Offset(0f, 0f),
-                        end = Offset(w * 0.70f, h * 0.70f)
-                    )
-                )
+            .then(
+                // When the AGSL panel shader is NOT active (older API / fallback), draw the
+                // translucent fill ourselves so the key has a visible glass body.
+                // When the panel shader IS active it draws the key fill+refraction itself.
+                if (!isLiquidShaderActive) {
+                    Modifier.drawBehind {
+                        val w = size.width
+                        val h = size.height
+                        drawCircle(
+                            brush = Brush.verticalGradient(
+                                colors = listOf(topFill, bottomFill),
+                                startY = 0f,
+                                endY = h
+                            )
+                        )
+                    }
+                } else Modifier
+            )
+            // Rim highlight (liquidBubbleHighlight) on top of whatever the shader drew.
+            // intensity: 0.35 at rest → up to 1.0 when pressed
+            .liquidBubbleHighlight(isDark = palette.isDark, cornerFraction = 0.5f) {
+                0.35f + 0.65f * pressProgress
             }
             .combinedClickable(
                 interactionSource = interactionSource,

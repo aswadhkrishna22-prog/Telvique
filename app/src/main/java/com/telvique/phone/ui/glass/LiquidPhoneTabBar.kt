@@ -447,16 +447,16 @@ fun LiquidPhoneTabBar(
                             ambientShadowColor = Color.Black.copy(alpha = 0.08f)
                             spotShadowColor = Color.Black.copy(alpha = 0.16f)
                         }
-                        .liquidBubbleHighlight(isDark) { 0.25f + 0.75f * lift.coerceIn(0f, 1f) }
+                        .liquidBubbleHighlight(isDark) { 0.55f + 0.45f * lift.coerceIn(0f, 1f) }
                         .liquid(railState) {
                             val amount = lift.coerceIn(0f, 1f)
                             shape = LensShape
                             frost = 0.dp
-                            refraction = 0.08f + 0.37f * amount
-                            curve = 0.04f + 0.16f * amount
-                            edge = 0.012f + 0.023f * amount
-                            dispersion = 0.14f * amount
-                            saturation = 1.10f
+                            refraction = 0.14f + 0.36f * amount
+                            curve = 0.08f + 0.18f * amount
+                            edge = 0.016f + 0.028f * amount
+                            dispersion = 0.18f * amount
+                            saturation = 1.15f
                             tint = Color.White.copy(alpha = if (isDark) 0.012f else 0.018f)
                         },
                 )
@@ -746,7 +746,7 @@ private fun Modifier.navigationRail(
     refraction = 0.07f
     curve = 0.12f
     edge = 0.012f
-    saturation = 1.10f
+    saturation = 1.15f
     dispersion = 0f
     tint = color
 }
