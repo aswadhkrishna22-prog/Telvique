@@ -71,6 +71,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -123,11 +124,12 @@ import com.telvique.phone.ui.glass.liquidBubbleHighlight
 import com.telvique.phone.ui.icons.ApplePhoneIcons
 import com.telvique.phone.ui.theme.LocalApplePalette
 
-// ── LIQUID GLASS AGSL SHADER & BACKDROP BLUR TUNING CONSTANTS ─────────────────
-const val KEYPAD_BACKDROP_BLUR_RADIUS_DP = 24f // Soft blur radius for keypad backdrop layer
-const val KEYPAD_BACKDROP_DARK_TINT = 0.30f // Dark tint over blurred backdrop (25-35% black)
-const val KEYPAD_REFRACTION_STRENGTH = 0.28f // Refraction bending & magnification strength
+// ── KEYPAD BACKDROP BLUR & LIQUID GLASS TUNING CONSTANTS ───────────────────────
+const val KEYPAD_BACKDROP_BLUR_RADIUS_DP = 25f // Strong blur radius for Layer B (~25dp)
+const val KEYPAD_BACKDROP_DARK_TINT = 0.30f // Dark tint over Layer B (~30% black, adjustable)
+const val KEYPAD_FALLBACK_DARK_TINT = 0.80f // Fallback tint opacity for API < 31 (~80% opacity)
 const val KEYPAD_DISPERSION_STRENGTH = 0.022f // Subtle rainbow dispersion at rim only (~50% reduced)
+const val KEYPAD_REFRACTION_STRENGTH = 0.28f // Refraction bending & magnification strength
 const val KEYPAD_SPECULAR_STRENGTH = 0.35f // Soft top-left specular highlight intensity
 const val KEYPAD_FADE_TOP_DP = 16f // Height of the fade-in gradient at the top of the glass region
 const val KEYPAD_GLASS_TOP_OFFSET_DP = 4f // Distance above the first key row where glass starts (4px/dp)
@@ -311,6 +313,7 @@ fun DialerScreen(
 
     val listState = rememberLazyListState()
     val listGraphicsLayer = rememberGraphicsLayer()
+    val layerBGraphicsLayer = rememberGraphicsLayer()
 
     var keypadPanelHeightPx by remember { mutableIntStateOf(0) }
     var topBarHeightPx by remember { mutableIntStateOf(0) }
@@ -364,7 +367,22 @@ fun DialerScreen(
         }
     }
 
-    val isLiquidShaderCapable = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && isBackdropGlassCapable()
+    val isBlurCapable = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && isBackdropGlassCapable()
+    val isLiquidShaderCapable = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && isBlurCapable
+
+    if (isBlurCapable) {
+        val blurPx = with(density) { KEYPAD_BACKDROP_BLUR_RADIUS_DP.dp.toPx() }
+        layerBGraphicsLayer.renderEffect = remember(blurPx) {
+            RenderEffect.createBlurEffect(
+                blurPx,
+                blurPx,
+                Shader.TileMode.CLAMP
+            ).asComposeRenderEffect()
+        }
+    } else {
+        layerBGraphicsLayer.renderEffect = null
+    }
+
     val fallbackPanelColor = palette.background.copy(alpha = 0.94f)
 
     val statusTopDp = with(density) { WindowInsets.statusBars.getTop(this).toDp() }
@@ -624,44 +642,46 @@ fun DialerScreen(
             val glassHeightPx = (keypadPanelHeightPx - glassTopOffsetPx).coerceAtLeast(0f)
             val glassTopInRootPx = panelTopInRootPx + glassTopOffsetPx
 
-            // ── ONE SINGLE LIQUID GLASS AGSL SHADER OVER THE WHOLE KEYPAD REGION (API 33+) ──
+            // ── LAYER B: BLURRED COPY OF CALL LIST CLIPPED ONLY TO KEYPAD REGION ──
             if (glassHeightPx > 0f) {
-                if (isLiquidShaderCapable) {
-                    val keyRadiusPx = with(density) { 38.dp.toPx() }
-                    val fadeTopPx = with(density) { KEYPAD_FADE_TOP_DP.dp.toPx() }
-                    val keyCentersArray = remember(panelWidthPx, density) { FloatArray(24) }
+                val keyRadiusPx = with(density) { 38.dp.toPx() }
+                val fadeTopPx = with(density) { KEYPAD_FADE_TOP_DP.dp.toPx() }
+                val keyCentersArray = remember(panelWidthPx, density) { FloatArray(24) }
 
-                    // Compute exact center coordinates of all 12 keys relative to the glass region
-                    if (panelWidthPx > 0f) {
-                        val gridSidePaddingPx = with(density) { 20.dp.toPx() }
-                        val rowWidthPx = panelWidthPx - gridSidePaddingPx * 2f
-                        val keyDiameterPx = keyRadiusPx * 2f
-                        val availableSpacePx = rowWidthPx - (keyDiameterPx * 3f)
-                        val gapPx = availableSpacePx / 4f
+                // Compute exact center coordinates of all 12 keys relative to the glass region
+                if (panelWidthPx > 0f) {
+                    val gridSidePaddingPx = with(density) { 20.dp.toPx() }
+                    val rowWidthPx = panelWidthPx - gridSidePaddingPx * 2f
+                    val keyDiameterPx = keyRadiusPx * 2f
+                    val availableSpacePx = rowWidthPx - (keyDiameterPx * 3f)
+                    val gapPx = availableSpacePx / 4f
 
-                        val cx0 = gridSidePaddingPx + gapPx + keyRadiusPx
-                        val cx1 = panelWidthPx / 2f
-                        val cx2 = panelWidthPx - cx0
+                    val cx0 = gridSidePaddingPx + gapPx + keyRadiusPx
+                    val cx1 = panelWidthPx / 2f
+                    val cx2 = panelWidthPx - cx0
 
-                        val cy0 = with(density) { KEYPAD_GLASS_TOP_OFFSET_DP.dp.toPx() } + keyRadiusPx
-                        val rowStepPx = with(density) { (76.dp + 8.dp).toPx() }
+                    val cy0 = with(density) { KEYPAD_GLASS_TOP_OFFSET_DP.dp.toPx() } + keyRadiusPx
+                    val rowStepPx = with(density) { (76.dp + 8.dp).toPx() }
 
-                        for (r in 0 until 4) {
-                            val cy = cy0 + r * rowStepPx
-                            keyCentersArray[(r * 3 + 0) * 2] = cx0
-                            keyCentersArray[(r * 3 + 0) * 2 + 1] = cy
-                            keyCentersArray[(r * 3 + 1) * 2] = cx1
-                            keyCentersArray[(r * 3 + 1) * 2 + 1] = cy
-                            keyCentersArray[(r * 3 + 2) * 2] = cx2
-                            keyCentersArray[(r * 3 + 2) * 2 + 1] = cy
-                        }
+                    for (r in 0 until 4) {
+                        val cy = cy0 + r * rowStepPx
+                        keyCentersArray[(r * 3 + 0) * 2] = cx0
+                        keyCentersArray[(r * 3 + 0) * 2 + 1] = cy
+                        keyCentersArray[(r * 3 + 1) * 2] = cx1
+                        keyCentersArray[(r * 3 + 1) * 2 + 1] = cy
+                        keyCentersArray[(r * 3 + 2) * 2] = cx2
+                        keyCentersArray[(r * 3 + 2) * 2 + 1] = cy
                     }
+                }
 
+                if (isLiquidShaderCapable) {
+                    // API 33+: Liquid Glass AGSL Shader sampling Layer B (the blurred copy of the list)
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(with(density) { glassHeightPx.toDp() })
                             .align(Alignment.BottomCenter)
+                            .clipToBounds()
                             .graphicsLayer {
                                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && size.width > 0f && size.height > 0f) {
                                     val shader = KeypadLiquidGlassShader.getOrCreateShader()
@@ -678,14 +698,10 @@ fun DialerScreen(
                                         shader.setFloatUniform("uPressedIndex", pressedKeyIndex.toFloat())
                                         shader.setFloatUniform("uPressedProgress", pressedKeyProgress)
 
-                                        val blurPx = with(density) { KEYPAD_BACKDROP_BLUR_RADIUS_DP.dp.toPx() }
-                                        val blurEffect = RenderEffect.createBlurEffect(
-                                            blurPx,
-                                            blurPx,
-                                            Shader.TileMode.CLAMP
-                                        )
-                                        val shaderEffect = RenderEffect.createRuntimeShaderEffect(shader, "content")
-                                        renderEffect = RenderEffect.createChainEffect(shaderEffect, blurEffect).asComposeRenderEffect()
+                                        renderEffect = RenderEffect.createRuntimeShaderEffect(
+                                            shader,
+                                            "content"
+                                        ).asComposeRenderEffect()
                                     } else {
                                         renderEffect = null
                                     }
@@ -696,20 +712,59 @@ fun DialerScreen(
                     ) {
                         Canvas(modifier = Modifier.matchParentSize()) {
                             if (listGraphicsLayer.size != IntSize.Zero) {
-                                translate(left = 0f, top = -glassTopInRootPx) {
-                                    drawLayer(listGraphicsLayer)
+                                layerBGraphicsLayer.record {
+                                    translate(left = 0f, top = -glassTopInRootPx) {
+                                        drawLayer(listGraphicsLayer)
+                                    }
                                 }
+                                drawLayer(layerBGraphicsLayer)
                             }
                         }
                     }
+                } else if (isBlurCapable) {
+                    // API 31-32: RenderEffect blur supported, AGSL RuntimeShader not available.
+                    // Draw Layer B (blurred list) directly with 30% dark tint and top fade gradient.
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(with(density) { glassHeightPx.toDp() })
+                            .align(Alignment.BottomCenter)
+                            .clipToBounds()
+                    ) {
+                        Canvas(modifier = Modifier.matchParentSize()) {
+                            if (listGraphicsLayer.size != IntSize.Zero) {
+                                layerBGraphicsLayer.record {
+                                    translate(left = 0f, top = -glassTopInRootPx) {
+                                        drawLayer(listGraphicsLayer)
+                                    }
+                                }
+                                drawLayer(layerBGraphicsLayer)
+                            }
+                        }
+                        val tintColor = if (palette.isDark) Color.Black else Color(0xFF14161F)
+                        Box(
+                            modifier = Modifier
+                                .matchParentSize()
+                                .background(
+                                    Brush.verticalGradient(
+                                        0.00f to Color.Transparent,
+                                        0.08f to tintColor.copy(alpha = KEYPAD_BACKDROP_DARK_TINT * 0.5f),
+                                        0.16f to tintColor.copy(alpha = KEYPAD_BACKDROP_DARK_TINT),
+                                        1.00f to tintColor.copy(alpha = KEYPAD_BACKDROP_DARK_TINT)
+                                    )
+                                )
+                        )
+                    }
                 } else {
-                    // API < 33 fallback: simple translucent dark fill with gentle gradient fade-in
-                    val fallbackGradient = remember(fallbackPanelColor) {
+                    // API < 31 fallback: no blur supported.
+                    // Draw dark tint at about 80% opacity with top fade gradient so call list is illegible.
+                    val fallbackDarkColor = if (palette.isDark) Color.Black else Color(0xFF14161F)
+                    val fallbackGradient = remember(fallbackDarkColor) {
                         Brush.verticalGradient(
                             0.00f to Color.Transparent,
-                            0.06f to fallbackPanelColor.copy(alpha = 0.50f),
-                            0.16f to fallbackPanelColor,
-                            1.00f to fallbackPanelColor
+                            0.08f to fallbackDarkColor.copy(alpha = KEYPAD_FALLBACK_DARK_TINT * 0.5f),
+                            0.16f to fallbackDarkColor.copy(alpha = KEYPAD_FALLBACK_DARK_TINT),
+                            1.00f to fallbackDarkColor.copy(alpha = KEYPAD_FALLBACK_DARK_TINT)
                         )
                     }
                     Box(
@@ -717,6 +772,7 @@ fun DialerScreen(
                             .fillMaxWidth()
                             .height(with(density) { glassHeightPx.toDp() })
                             .align(Alignment.BottomCenter)
+                            .clipToBounds()
                             .background(fallbackGradient)
                     )
                 }
