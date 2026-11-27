@@ -158,6 +158,7 @@ const val KEYPAD_DISPERSION_STRENGTH = 0.012f // Low strength chromatic dispersi
 const val KEYPAD_REFRACTION_STRENGTH = 0.18f // Low strength rim-only lens refraction
 const val KEYPAD_SPECULAR_STRENGTH = 0.22f // Dim top-left rim highlight intensity (no center spot)
 const val KEYPAD_FADE_TOP_DP = 6f // Short fade-in gradient at the top of the glass region
+const val KEYPAD_FROST_STRENGTH = 1.0f // Premium frosted-glass look (vibrancy + grain + soft sheen). 0 = off, 1 = default, 1.5 = stronger
 
 // ── AGSL RUNTIME SHADER (LIQUID GLASS REFRACTION, CHROMATIC DISPERSION & SPECULAR) ──
 private const val KEYPAD_LIQUID_GLASS_SHADER_SRC = """
@@ -173,10 +174,44 @@ private const val KEYPAD_LIQUID_GLASS_SHADER_SRC = """
     uniform float uDarkTint;
     uniform float uPressedIndex;
     uniform float uPressedProgress;
+    uniform float uKeyTopY;
+    uniform float uDp;
+    uniform float uFrost;
+
+    float hash21(float2 q) {
+        return fract(sin(dot(q, float2(12.9898, 78.233))) * 43758.5453);
+    }
+
+    // Frosted-glass treatment for the blurred backdrop: vibrancy (saturation + lift), fine grain,
+    // a soft top-lit sheen and a wide glow band just above key row 1. All scaled by a smooth ramp
+    // (0 well above the keys), so there is never a hard edge.
+    half4 frostGlass(half4 c, float2 p) {
+        float f = smoothstep(uKeyTopY - 30.0 * uDp, uKeyTopY + 60.0 * uDp, p.y) * uFrost;
+        half a = c.a;
+        half3 rgb = (a > 0.004) ? (c.rgb / a) : half3(0.0);
+
+        half lum = dot(rgb, half3(0.2126, 0.7152, 0.0722));
+        rgb = mix(half3(lum), rgb, half(1.0 + 0.35 * f));
+        rgb = rgb * half(1.0 + 0.10 * f);
+
+        float n = hash21(p) - 0.5;
+        rgb += half3(half(n * 0.035 * f));
+        rgb = clamp(rgb, half3(0.0), half3(1.0));
+
+        half3 prem = rgb * a;
+
+        float band = exp(-pow((p.y - (uKeyTopY - 4.0 * uDp)) / (11.0 * uDp), 2.0));
+        float topLight = 0.035 * f * (1.0 - clamp(p.y / uSize.y, 0.0, 1.0));
+        float themeScale = (uDarkTheme > 0.5) ? 1.0 : 0.5;
+        float s = clamp((0.055 * band * uFrost + topLight) * themeScale, 0.0, 1.0);
+        prem = prem * half(1.0 - s) + half3(half(s));
+        a = a * half(1.0 - s) + half(s);
+        return half4(prem, a);
+    }
 
     half4 main(float2 p) {
         float2 clampedP = clamp(p, float2(0.0), uSize - float2(1.0));
-        half4 bgSample = content.eval(clampedP);
+        half4 bgSample = frostGlass(content.eval(clampedP), p);
 
         // 1. Find closest key among the 12 keys using circle SDF
         float minSdf = 10000.0;
@@ -226,12 +261,20 @@ private const val KEYPAD_LIQUID_GLASS_SHADER_SRC = """
         half gChannel = content.eval(coordG).g;
         half bChannel = content.eval(coordB).b;
         half aChannel = content.eval(coordG).a;
-        half3 keyRefract = half3(rChannel, gChannel, bChannel);
+        half4 keyBase = frostGlass(half4(rChannel, gChannel, bChannel, aChannel), p);
+        half3 keyRefract = keyBase.rgb;
+        aChannel = keyBase.a;
 
         // 3. Thin soft rim sheen along top-left (dim gradient, no center spot)
         float angleToLight = dot(dir, float2(-0.7071, -0.7071));
         float rimSheen = max(0.0, angleToLight) * pow(rNorm, 3.0) * 0.35;
         float totalSpec = rimSheen * uSpecular;
+
+        // Crisp thin glass edge (brighter toward the light) + soft top glow inside each key
+        float ring = smoothstep(-2.5, -0.8, minSdf) * (1.0 - smoothstep(-0.8, 0.6, minSdf));
+        totalSpec += ring * (0.08 + 0.28 * max(0.0, angleToLight)) * uFrost;
+        float vy = (p.y - closestCenter.y) / R;
+        totalSpec += 0.04 * clamp(-vy, 0.0, 1.0) * (1.0 - 0.5 * rNorm) * uFrost;
 
         // 4. Flat base glass tint (translucent white 13-16%)
         half3 baseKeyTint = half3(1.0, 1.0, 1.0);
@@ -682,6 +725,8 @@ fun DialerScreen(
                 }
 
                 val keyRadiusPx = with(density) { 38.dp.toPx() }
+                val keyTopInGlassPx = keyGridTopInPanelPx - glassTopOffsetPx
+                val glassDensityPx = density.density
                 val keyCentersArray = remember(panelWidthPx, density) { FloatArray(24) }
 
                 // Compute exact center coordinates of all 12 keys relative to the glass region
@@ -746,6 +791,9 @@ fun DialerScreen(
                                             shader.setFloatUniform("uDarkTint", 0f)
                                             shader.setFloatUniform("uPressedIndex", pressedKeyIndex.toFloat())
                                             shader.setFloatUniform("uPressedProgress", pressedKeyProgress)
+                                            shader.setFloatUniform("uKeyTopY", keyTopInGlassPx)
+                                            shader.setFloatUniform("uDp", glassDensityPx)
+                                            shader.setFloatUniform("uFrost", KEYPAD_FROST_STRENGTH)
 
                                             renderEffect = RenderEffect.createRuntimeShaderEffect(
                                                 shader,
