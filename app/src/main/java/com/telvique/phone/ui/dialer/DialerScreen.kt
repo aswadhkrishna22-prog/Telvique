@@ -1,8 +1,11 @@
 package com.telvique.phone.ui.dialer
 
+import android.graphics.RenderEffect
+import android.graphics.RuntimeShader
 import android.media.AudioManager
 import android.media.ToneGenerator
 import android.os.Build
+import androidx.annotation.RequiresApi
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
@@ -13,6 +16,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -54,6 +58,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -61,18 +66,24 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asComposeRenderEffect
+import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.layer.drawLayer
+import androidx.compose.ui.graphics.rememberGraphicsLayer
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -83,7 +94,6 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.telvique.phone.R
 import com.telvique.phone.data.CallLogItem
 import com.telvique.phone.data.CallLogType
 import com.telvique.phone.data.ContactItem
@@ -101,13 +111,137 @@ import com.telvique.phone.ui.glass.isBackdropGlassCapable
 import com.telvique.phone.ui.glass.liquidBubbleHighlight
 import com.telvique.phone.ui.icons.ApplePhoneIcons
 import com.telvique.phone.ui.theme.LocalApplePalette
-import dev.chrisbanes.haze.HazeInput
-import dev.chrisbanes.haze.HazePerformanceMode
-import dev.chrisbanes.haze.HazeState
-import dev.chrisbanes.haze.blur.HazeBlurStyle
-import dev.chrisbanes.haze.blur.HazeColorEffect
-import dev.chrisbanes.haze.blur.hazeBlur
-import dev.chrisbanes.haze.hazeSource
+
+// ── LIQUID GLASS AGSL SHADER TUNING CONSTANTS ────────────────────────────────
+const val KEYPAD_REFRACTION_STRENGTH = 0.28f // Refraction bending & magnification strength
+const val KEYPAD_DISPERSION_STRENGTH = 0.045f // Subtle chromatic dispersion (rainbow fringe) at the rim
+const val KEYPAD_SPECULAR_STRENGTH = 0.35f // Soft top-left specular highlight intensity
+const val KEYPAD_FADE_TOP_DP = 12f // Height of the fade-in gradient at the top of the glass region
+const val KEYPAD_GLASS_TOP_OFFSET_DP = 4f // Distance above the first key row where glass starts (4px/dp)
+
+// ── AGSL RUNTIME SHADER (LIQUID GLASS REFRACTION, CHROMATIC DISPERSION & SPECULAR) ──
+private const val KEYPAD_LIQUID_GLASS_SHADER_SRC = """
+    uniform shader content;
+    uniform float2 uSize;
+    uniform float uKeyRadius;
+    uniform float uKeyCenters[24];
+    uniform float uRefraction;
+    uniform float uDispersion;
+    uniform float uSpecular;
+    uniform float uFadeTopPx;
+    uniform float uDarkTheme;
+    uniform float uPressedIndex;
+    uniform float uPressedProgress;
+
+    half4 main(float2 p) {
+        // 1. Fade-in gradient at top of glass region (starts 4px above row 1, fades over uFadeTopPx)
+        float topFade = clamp(p.y / max(uFadeTopPx, 1.0), 0.0, 1.0);
+        topFade = topFade * topFade * (3.0 - 2.0 * topFade);
+
+        if (topFade <= 0.001) {
+            return half4(0.0);
+        }
+
+        // 2. Find closest key among the 12 keys using circle SDF
+        float minSdf = 10000.0;
+        int closestIdx = -1;
+        float2 closestCenter = float2(0.0);
+        float closestDist = 10000.0;
+
+        for (int i = 0; i < 12; ++i) {
+            float2 c = float2(uKeyCenters[2 * i], uKeyCenters[2 * i + 1]);
+            float2 d = p - c;
+            float dist = length(d);
+            float sdf = dist - uKeyRadius;
+            if (sdf < minSdf) {
+                minSdf = sdf;
+                closestIdx = i;
+                closestCenter = c;
+                closestDist = dist;
+            }
+        }
+
+        float keyAlpha = 1.0 - smoothstep(-1.2, 0.8, minSdf);
+
+        // 3. Background glass scrim outside/between keys
+        float2 clampedP = clamp(p, float2(0.0), uSize - float2(1.0));
+        half4 bgSample = content.eval(clampedP);
+        half3 bgScrim = (uDarkTheme > 0.5) ? half3(0.06, 0.06, 0.08) : half3(1.0, 1.0, 1.0);
+        half scrimAlpha = (uDarkTheme > 0.5) ? 0.52 : 0.60;
+        half3 bgMixed = mix(bgSample.rgb, bgScrim, scrimAlpha);
+        half4 bgColor = half4(bgMixed, bgSample.a * half(topFade));
+
+        if (keyAlpha <= 0.001) {
+            return bgColor;
+        }
+
+        // 4. Inside key: Liquid Glass Refraction & Chromatic Dispersion
+        float r = closestDist;
+        float R = uKeyRadius;
+        float rNorm = clamp(r / R, 0.0, 1.0);
+        float2 dir = (r > 0.001) ? ((p - closestCenter) / r) : float2(0.0, 0.0);
+
+        // Slight magnification in center + strong bending toward edge at rim
+        float mag = uRefraction * 0.14 * (1.0 - rNorm);
+        float rimBend = uRefraction * 0.42 * (rNorm * rNorm * rNorm);
+        float totalOffset = (mag - rimBend) * R;
+        float2 pRefract = p + dir * totalOffset;
+
+        // Subtle chromatic dispersion: thin rainbow fringe at rim only
+        float disp = uDispersion * pow(rNorm, 3.5) * R;
+        float2 coordR = clamp(pRefract - dir * disp, float2(0.0), uSize - float2(1.0));
+        float2 coordG = clamp(pRefract, float2(0.0), uSize - float2(1.0));
+        float2 coordB = clamp(pRefract + dir * disp, float2(0.0), uSize - float2(1.0));
+
+        half rChannel = content.eval(coordR).r;
+        half gChannel = content.eval(coordG).g;
+        half bChannel = content.eval(coordB).b;
+        half aChannel = content.eval(coordG).a;
+        half3 keyRefract = half3(rChannel, gChannel, bChannel);
+
+        // 5. Soft specular highlight on top-left of each key (no stroke/border)
+        float2 specCenter = closestCenter + float2(-0.35, -0.35) * R;
+        float specDist = length(p - specCenter) / (0.45 * R);
+        float specSpot = exp(-specDist * specDist * 2.4);
+
+        float angleToLight = dot(dir, float2(-0.7071, -0.7071));
+        float rimSheen = max(0.0, angleToLight) * pow(rNorm, 2.2) * 0.35;
+        float totalSpec = (specSpot * 0.75 + rimSheen * 0.25) * uSpecular;
+
+        // 6. Base glass translucent tint & press brightening
+        half3 baseKeyTint = (uDarkTheme > 0.5) ? half3(1.0, 1.0, 1.0) : half3(1.0, 1.0, 1.0);
+        half baseKeyAlpha = (uDarkTheme > 0.5) ? 0.10 : 0.58;
+
+        if (float(closestIdx) == uPressedIndex) {
+            baseKeyAlpha += half(0.12 * uPressedProgress);
+            totalSpec += 0.15 * uPressedProgress;
+        }
+
+        half3 keyFinalRgb = mix(keyRefract, baseKeyTint, baseKeyAlpha) + half3(totalSpec);
+        half4 keyColor = half4(keyFinalRgb, aChannel);
+
+        // 7. Blend key with background glass scrim based on key circle anti-aliased edge
+        half4 finalColor = mix(bgColor, keyColor, half(keyAlpha));
+        finalColor.a *= half(topFade);
+        return finalColor;
+    }
+"""
+
+private object KeypadLiquidGlassShader {
+    private var cachedShader: RuntimeShader? = null
+
+    @RequiresApi(Build.VERSION_CODES.TIRAMISU)
+    fun getOrCreateShader(): RuntimeShader? {
+        if (cachedShader == null) {
+            try {
+                cachedShader = RuntimeShader(KEYPAD_LIQUID_GLASS_SHADER_SRC)
+            } catch (_: Throwable) {
+                cachedShader = null
+            }
+        }
+        return cachedShader
+    }
+}
 
 private data class DialKey(
     val digit: String,
@@ -155,10 +289,18 @@ fun DialerScreen(
     @Suppress("DEPRECATION")
     val clipboard = LocalClipboardManager.current
 
-    val hazeState = remember { HazeState() }
     val listState = rememberLazyListState()
+    val listGraphicsLayer = rememberGraphicsLayer()
+
     var keypadPanelHeightPx by remember { mutableIntStateOf(0) }
     var topBarHeightPx by remember { mutableIntStateOf(0) }
+    var keyGridTopInPanelPx by remember { mutableFloatStateOf(with(density) { 16.dp.toPx() }) }
+    var panelTopInRootPx by remember { mutableFloatStateOf(0f) }
+    var panelWidthPx by remember { mutableFloatStateOf(0f) }
+
+    var pressedKeyIndex by remember { mutableIntStateOf(-1) }
+    var pressedKeyProgress by remember { mutableFloatStateOf(0f) }
+
     var selectedContact by remember { mutableStateOf<ContactItem?>(null) }
 
     val keypadPanelHeightDp = with(density) { keypadPanelHeightPx.toDp() }
@@ -199,53 +341,8 @@ fun DialerScreen(
         }
     }
 
-    val isBlurEnabled = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && isBackdropGlassCapable()
-    val glassPanelTint = if (palette.isDark) {
-        Color(0xFF101014).copy(alpha = 0.50f)
-    } else {
-        Color.White.copy(alpha = 0.60f)
-    }
+    val isLiquidShaderCapable = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && isBackdropGlassCapable()
     val fallbackPanelColor = palette.background.copy(alpha = 0.94f)
-
-    val keypadHazeStyle = if (isBlurEnabled) {
-        remember(palette.background, glassPanelTint) {
-            val tintEffect = HazeColorEffect.tint(glassPanelTint)
-            HazeBlurStyle {
-                blurEnabled(true)
-                backgroundColor(palette.background)
-                colorEffects(listOf(tintEffect))
-                fallbackColorEffect(tintEffect)
-                blurRadius(18.dp)
-                noiseFactor(0.005f)
-                mask(
-                    Brush.verticalGradient(
-                        0.00f to Color.Transparent,
-                        0.32f to Color.Black,
-                        1.00f to Color.Black
-                    )
-                )
-            }
-        }
-    } else {
-        null
-    }
-
-    val panelTintBrush = remember(glassPanelTint) {
-        Brush.verticalGradient(
-            0.00f to Color.Transparent,
-            0.18f to glassPanelTint.copy(alpha = glassPanelTint.alpha * 0.35f),
-            0.38f to glassPanelTint,
-            1.00f to glassPanelTint
-        )
-    }
-    val fallbackGradientBrush = remember(fallbackPanelColor) {
-        Brush.verticalGradient(
-            0.00f to Color.Transparent,
-            0.20f to fallbackPanelColor.copy(alpha = 0.45f),
-            0.42f to fallbackPanelColor,
-            1.00f to fallbackPanelColor
-        )
-    }
 
     val statusTopDp = with(density) { WindowInsets.statusBars.getTop(this).toDp() }
     val showTopRow = simAccounts.size > 1 || showTopSettingsButton
@@ -263,7 +360,7 @@ fun DialerScreen(
             .fillMaxSize()
             .background(palette.background)
     ) {
-        // Layer 0: Scrollable Recents / T9 Match list
+        // Layer 0: Scrollable Recents / T9 Match list captured into offscreen graphics layer
         // Extends underneath the keypad when input is empty;
         // Ends above the number display when input is not empty.
         LazyColumn(
@@ -272,7 +369,12 @@ fun DialerScreen(
                 .fillMaxSize()
                 .padding(bottom = listBottomPaddingDp)
                 .background(palette.background)
-                .hazeSource(state = hazeState),
+                .drawWithContent {
+                    listGraphicsLayer.record {
+                        this@drawWithContent.drawContent()
+                    }
+                    drawLayer(listGraphicsLayer)
+                },
             contentPadding = PaddingValues(
                 top = topBarReservedHeightDp + 6.dp,
                 bottom = if (input.isNotEmpty()) 20.dp else keypadPanelHeightDp + 20.dp
@@ -469,33 +571,117 @@ fun DialerScreen(
             }
         }
 
-        // Layer 1: Keypad Panel anchored at bottom with progressive blur & no hard edge
+        // Layer 1: Keypad Panel anchored at bottom with AGSL liquid-glass backdrop
         Box(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
-                .onSizeChanged { keypadPanelHeightPx = it.height }
+                .onGloballyPositioned { coords ->
+                    if (coords.isAttached) {
+                        panelTopInRootPx = coords.positionInRoot().y
+                    }
+                    panelWidthPx = coords.size.width.toFloat()
+                    keypadPanelHeightPx = coords.size.height
+                }
         ) {
-            // ONE single blur layer behind the whole keypad area (Android 12+ RenderEffect via Haze; dark translucent gradient fallback < 12)
-            Box(
-                modifier = Modifier
-                    .matchParentSize()
-                    .then(
-                        if (isBlurEnabled && keypadHazeStyle != null) {
-                            Modifier
-                                .hazeBlur(
-                                    input = HazeInput.Sources(hazeState),
-                                    style = keypadHazeStyle,
-                                    performanceMode = HazePerformanceMode.Fixed(0.35f)
-                                )
-                                .background(panelTintBrush)
-                        } else {
-                            Modifier.background(fallbackGradientBrush)
-                        }
-                    )
-            )
+            // Glass region starts 4px above the top edge of key row 1 (key 1, 2, 3), not at row 4
+            val glassTopOffsetPx = maxOf(0f, keyGridTopInPanelPx - with(density) { KEYPAD_GLASS_TOP_OFFSET_DP.dp.toPx() })
+            val glassHeightPx = (keypadPanelHeightPx - glassTopOffsetPx).coerceAtLeast(0f)
+            val glassTopInRootPx = panelTopInRootPx + glassTopOffsetPx
 
-            // Keypad foreground controls (keys, digits, and letters sit ABOVE the blur layer)
+            // ── ONE SINGLE LIQUID GLASS AGSL SHADER OVER THE WHOLE KEYPAD REGION (API 33+) ──
+            if (glassHeightPx > 0f) {
+                if (isLiquidShaderCapable) {
+                    val keyRadiusPx = with(density) { 38.dp.toPx() }
+                    val fadeTopPx = with(density) { KEYPAD_FADE_TOP_DP.dp.toPx() }
+                    val keyCentersArray = remember(panelWidthPx, density) { FloatArray(24) }
+
+                    // Compute exact center coordinates of all 12 keys relative to the glass region
+                    if (panelWidthPx > 0f) {
+                        val gridSidePaddingPx = with(density) { 20.dp.toPx() }
+                        val rowWidthPx = panelWidthPx - gridSidePaddingPx * 2f
+                        val keyDiameterPx = keyRadiusPx * 2f
+                        val availableSpacePx = rowWidthPx - (keyDiameterPx * 3f)
+                        val gapPx = availableSpacePx / 4f
+
+                        val cx0 = gridSidePaddingPx + gapPx + keyRadiusPx
+                        val cx1 = panelWidthPx / 2f
+                        val cx2 = panelWidthPx - cx0
+
+                        val cy0 = with(density) { KEYPAD_GLASS_TOP_OFFSET_DP.dp.toPx() } + keyRadiusPx
+                        val rowStepPx = with(density) { (76.dp + 8.dp).toPx() }
+
+                        for (r in 0 until 4) {
+                            val cy = cy0 + r * rowStepPx
+                            keyCentersArray[(r * 3 + 0) * 2] = cx0
+                            keyCentersArray[(r * 3 + 0) * 2 + 1] = cy
+                            keyCentersArray[(r * 3 + 1) * 2] = cx1
+                            keyCentersArray[(r * 3 + 1) * 2 + 1] = cy
+                            keyCentersArray[(r * 3 + 2) * 2] = cx2
+                            keyCentersArray[(r * 3 + 2) * 2 + 1] = cy
+                        }
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(with(density) { glassHeightPx.toDp() })
+                            .align(Alignment.BottomCenter)
+                            .graphicsLayer {
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && size.width > 0f && size.height > 0f) {
+                                    val shader = KeypadLiquidGlassShader.getOrCreateShader()
+                                    if (shader != null) {
+                                        shader.setFloatUniform("uSize", size.width, size.height)
+                                        shader.setFloatUniform("uKeyRadius", keyRadiusPx)
+                                        shader.setFloatUniform("uKeyCenters", keyCentersArray)
+                                        shader.setFloatUniform("uRefraction", KEYPAD_REFRACTION_STRENGTH)
+                                        shader.setFloatUniform("uDispersion", KEYPAD_DISPERSION_STRENGTH)
+                                        shader.setFloatUniform("uSpecular", KEYPAD_SPECULAR_STRENGTH)
+                                        shader.setFloatUniform("uFadeTopPx", fadeTopPx)
+                                        shader.setFloatUniform("uDarkTheme", if (palette.isDark) 1f else 0f)
+                                        shader.setFloatUniform("uPressedIndex", pressedKeyIndex.toFloat())
+                                        shader.setFloatUniform("uPressedProgress", pressedKeyProgress)
+
+                                        renderEffect = RenderEffect
+                                            .createRuntimeShaderEffect(shader, "content")
+                                            .asComposeRenderEffect()
+                                    } else {
+                                        renderEffect = null
+                                    }
+                                } else {
+                                    renderEffect = null
+                                }
+                            }
+                    ) {
+                        Canvas(modifier = Modifier.matchParentSize()) {
+                            if (listGraphicsLayer.size != IntSize.Zero) {
+                                translate(left = 0f, top = -glassTopInRootPx) {
+                                    drawLayer(listGraphicsLayer)
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    // API < 33 fallback: simple translucent dark fill with gentle gradient fade-in
+                    val fallbackGradient = remember(fallbackPanelColor) {
+                        Brush.verticalGradient(
+                            0.00f to Color.Transparent,
+                            0.06f to fallbackPanelColor.copy(alpha = 0.50f),
+                            0.16f to fallbackPanelColor,
+                            1.00f to fallbackPanelColor
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(with(density) { glassHeightPx.toDp() })
+                            .align(Alignment.BottomCenter)
+                            .background(fallbackGradient)
+                    )
+                }
+            }
+
+            // Keypad foreground controls (keys, digits, and letters sit ABOVE the glass layer)
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -564,18 +750,25 @@ fun DialerScreen(
                     }
                 }
 
-                // 3x4 Frosted Glass Round Keys (circle shape 76.dp, no border)
+                // 3x4 Liquid Glass Round Keys (Circle shape 76.dp, no border)
                 Column(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .onGloballyPositioned { coords ->
+                            if (coords.isAttached) {
+                                keyGridTopInPanelPx = coords.positionInRoot().y - panelTopInRootPx
+                            }
+                        },
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    DialPadRows.forEach { row ->
+                    DialPadRows.forEachIndexed { rowIndex, row ->
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceEvenly
                         ) {
-                            row.forEach { key ->
+                            row.forEachIndexed { colIndex, key ->
+                                val keyIndex = rowIndex * 3 + colIndex
                                 val longTapAction: (() -> Unit)? = when {
                                     key.longPressDigit != null -> {
                                         {
@@ -601,6 +794,17 @@ fun DialerScreen(
                                 }
                                 AppleLiquidDialKey(
                                     key = key,
+                                    keyIndex = keyIndex,
+                                    isLiquidShaderActive = isLiquidShaderCapable,
+                                    onPressedChange = { idx, isPressed, progress ->
+                                        if (isPressed) {
+                                            pressedKeyIndex = idx
+                                            pressedKeyProgress = progress
+                                        } else if (pressedKeyIndex == idx) {
+                                            pressedKeyIndex = -1
+                                            pressedKeyProgress = 0f
+                                        }
+                                    },
                                     onTap = {
                                         playKeyFeedback(key.digit)
                                         onDigitPress(key.digit)
@@ -967,6 +1171,9 @@ private fun DialerContactMatchRow(
 @Composable
 private fun AppleLiquidDialKey(
     key: DialKey,
+    keyIndex: Int,
+    isLiquidShaderActive: Boolean,
+    onPressedChange: (Int, Boolean, Float) -> Unit,
     onTap: () -> Unit,
     onLongTap: (() -> Unit)? = null
 ) {
@@ -986,7 +1193,11 @@ private fun AppleLiquidDialKey(
         label = "dialKeyPressProgress"
     )
 
-    // Frosted glass: translucent fill (white ~8-12% alpha), subtle top-to-bottom light gradient, NO border or stroke
+    LaunchedEffect(isPressed, pressProgress) {
+        onPressedChange(keyIndex, isPressed, pressProgress)
+    }
+
+    // Translucent fill fallback for API < 33 (or when liquid shader is inactive)
     val restTop = if (palette.isDark) Color.White.copy(alpha = 0.12f) else Color.White.copy(alpha = 0.68f)
     val restBottom = if (palette.isDark) Color.White.copy(alpha = 0.08f) else Color.White.copy(alpha = 0.52f)
     val pressedTop = if (palette.isDark) Color.White.copy(alpha = 0.25f) else Color.White.copy(alpha = 0.88f)
@@ -994,6 +1205,24 @@ private fun AppleLiquidDialKey(
 
     val topFill = lerp(restTop, pressedTop, pressProgress)
     val bottomFill = lerp(restBottom, pressedBottom, pressProgress)
+
+    val keyBackgroundModifier = if (isLiquidShaderActive) {
+        // Liquid glass shader renders the key body, refraction, dispersion, and specular highlight.
+        // On press, a subtle touch tint enhances feedback.
+        if (isPressed) {
+            Modifier.background(
+                color = Color.White.copy(alpha = if (palette.isDark) 0.10f * pressProgress else 0.20f * pressProgress),
+                shape = CircleShape
+            )
+        } else {
+            Modifier
+        }
+    } else {
+        Modifier.background(
+            brush = Brush.verticalGradient(listOf(topFill, bottomFill)),
+            shape = CircleShape
+        )
+    }
 
     Column(
         modifier = Modifier
@@ -1003,10 +1232,7 @@ private fun AppleLiquidDialKey(
                 scaleY = scale
             }
             .clip(CircleShape)
-            .background(
-                brush = Brush.verticalGradient(listOf(topFill, bottomFill)),
-                shape = CircleShape
-            )
+            .then(keyBackgroundModifier)
             .combinedClickable(
                 interactionSource = interactionSource,
                 indication = null,
