@@ -74,6 +74,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asComposeRenderEffect
@@ -129,13 +131,14 @@ import dev.chrisbanes.haze.blur.hazeBlur
 import dev.chrisbanes.haze.hazeSource
 
 // ── KEYPAD BACKDROP BLUR & LIQUID GLASS TUNING CONSTANTS ───────────────────────
-const val KEYPAD_BACKDROP_BLUR_RADIUS_DP = 25f // Strong blur radius for Layer B (~25dp)
-const val KEYPAD_BACKDROP_DARK_TINT = 0.30f // Dark tint over Layer B (~30% black, adjustable)
+const val KEYPAD_BACKDROP_BLUR_RADIUS_DP = 32f // Strong blur radius for backdrop (~32dp)
+const val KEYPAD_KEY_REFRACTION_BLUR_DP = 6f // Light blur radius for key refraction layer (~6dp)
+const val KEYPAD_BACKDROP_DARK_TINT = 0.38f // Dark tint over backdrop (~38% black, adjustable)
 const val KEYPAD_FALLBACK_DARK_TINT = 0.80f // Fallback tint opacity for API < 31 (~80% opacity)
 const val KEYPAD_DISPERSION_STRENGTH = 0.022f // Subtle rainbow dispersion at rim only (~50% reduced)
 const val KEYPAD_REFRACTION_STRENGTH = 0.28f // Refraction bending & magnification strength
 const val KEYPAD_SPECULAR_STRENGTH = 0.35f // Soft top-left specular highlight intensity
-const val KEYPAD_FADE_TOP_DP = 16f // Height of the fade-in gradient at the top of the glass region
+const val KEYPAD_FADE_TOP_DP = 6f // Short fade-in gradient at the top of the glass region (finishes before key row 1)
 const val KEYPAD_GLASS_TOP_OFFSET_DP = 4f // Distance above the first key row where glass starts (4px/dp)
 
 // ── AGSL RUNTIME SHADER (LIQUID GLASS REFRACTION, CHROMATIC DISPERSION & SPECULAR) ──
@@ -632,7 +635,7 @@ fun DialerScreen(
                     val darkTintEffect = HazeColorEffect.tint(Color.Black.copy(alpha = KEYPAD_BACKDROP_DARK_TINT))
                     HazeBlurStyle {
                         blurEnabled(true)
-                        backgroundColor(Color.Transparent)
+                        backgroundColor(Color.Black.copy(alpha = KEYPAD_BACKDROP_DARK_TINT * 0.45f))
                         colorEffects(listOf(darkTintEffect))
                         fallbackColorEffect(darkTintEffect)
                         blurRadius(KEYPAD_BACKDROP_BLUR_RADIUS_DP.dp)
@@ -640,8 +643,7 @@ fun DialerScreen(
                         mask(
                             Brush.verticalGradient(
                                 0.00f to Color.Transparent,
-                                0.06f to Color.Black.copy(alpha = 0.50f),
-                                0.14f to Color.Black,
+                                0.015f to Color.Black,
                                 1.00f to Color.Black
                             )
                         )
@@ -695,8 +697,7 @@ fun DialerScreen(
                                 Modifier.background(
                                     Brush.verticalGradient(
                                         0.00f to Color.Transparent,
-                                        0.06f to Color.Black.copy(alpha = KEYPAD_FALLBACK_DARK_TINT * 0.5f),
-                                        0.14f to Color.Black.copy(alpha = KEYPAD_FALLBACK_DARK_TINT),
+                                        0.015f to Color.Black.copy(alpha = KEYPAD_FALLBACK_DARK_TINT),
                                         1.00f to Color.Black.copy(alpha = KEYPAD_FALLBACK_DARK_TINT)
                                     )
                                 )
@@ -1666,34 +1667,16 @@ private fun AppleLiquidDialKey(
         onPressedChange(keyIndex, isPressed, pressProgress)
     }
 
-    // Translucent fill fallback for API < 33 (or when liquid shader is inactive)
-    val restTop = if (palette.isDark) Color.White.copy(alpha = 0.12f) else Color.White.copy(alpha = 0.68f)
-    val restBottom = if (palette.isDark) Color.White.copy(alpha = 0.08f) else Color.White.copy(alpha = 0.52f)
-    val pressedTop = if (palette.isDark) Color.White.copy(alpha = 0.25f) else Color.White.copy(alpha = 0.88f)
-    val pressedBottom = if (palette.isDark) Color.White.copy(alpha = 0.18f) else Color.White.copy(alpha = 0.76f)
+    // Translucent fill: white about 8-12% in dark mode, subtle top-to-bottom vertical gradient
+    val restTop = if (palette.isDark) Color.White.copy(alpha = 0.12f) else Color.White.copy(alpha = 0.70f)
+    val restBottom = if (palette.isDark) Color.White.copy(alpha = 0.08f) else Color.White.copy(alpha = 0.54f)
+    val pressedTop = if (palette.isDark) Color.White.copy(alpha = 0.24f) else Color.White.copy(alpha = 0.88f)
+    val pressedBottom = if (palette.isDark) Color.White.copy(alpha = 0.16f) else Color.White.copy(alpha = 0.74f)
 
     val topFill = lerp(restTop, pressedTop, pressProgress)
     val bottomFill = lerp(restBottom, pressedBottom, pressProgress)
 
-    val keyBackgroundModifier = if (isLiquidShaderActive) {
-        // Liquid glass shader renders the key body, refraction, dispersion, and specular highlight.
-        // On press, a subtle touch tint enhances feedback.
-        if (isPressed) {
-            Modifier.background(
-                color = Color.White.copy(alpha = if (palette.isDark) 0.10f * pressProgress else 0.20f * pressProgress),
-                shape = CircleShape
-            )
-        } else {
-            Modifier
-        }
-    } else {
-        Modifier.background(
-            brush = Brush.verticalGradient(listOf(topFill, bottomFill)),
-            shape = CircleShape
-        )
-    }
-
-    Column(
+    Box(
         modifier = Modifier
             .size(76.dp)
             .graphicsLayer {
@@ -1701,61 +1684,104 @@ private fun AppleLiquidDialKey(
                 scaleY = scale
             }
             .clip(CircleShape)
-            .then(keyBackgroundModifier)
+            .drawBehind {
+                val w = size.width
+                val h = size.height
+
+                // 1. Translucent fill with subtle top-to-bottom gradient (8-12% white alpha in dark mode)
+                drawCircle(
+                    brush = Brush.verticalGradient(
+                        colors = listOf(topFill, bottomFill),
+                        startY = 0f,
+                        endY = h
+                    )
+                )
+
+                // 2. Soft specular highlight top-left (no stroke/border)
+                val specAlpha = (if (palette.isDark) 0.28f else 0.42f) + 0.12f * pressProgress
+                drawCircle(
+                    brush = Brush.radialGradient(
+                        colors = listOf(
+                            Color.White.copy(alpha = specAlpha),
+                            Color.Transparent
+                        ),
+                        center = Offset(w * 0.32f, h * 0.28f),
+                        radius = w * 0.42f
+                    )
+                )
+
+                // 3. Thin inner rim light via radial gradient (NOT a stroke)
+                val rimAlphaMid = if (palette.isDark) 0.08f else 0.18f
+                val rimAlphaEdge = (if (palette.isDark) 0.18f else 0.32f) + 0.08f * pressProgress
+                drawCircle(
+                    brush = Brush.radialGradient(
+                        0.00f to Color.Transparent,
+                        0.78f to Color.Transparent,
+                        0.92f to Color.White.copy(alpha = rimAlphaMid),
+                        1.00f to Color.White.copy(alpha = rimAlphaEdge),
+                        center = Offset(w * 0.5f, h * 0.5f),
+                        radius = w * 0.5f
+                    )
+                )
+            }
             .combinedClickable(
                 interactionSource = interactionSource,
                 indication = null,
                 onClick = onTap,
                 onLongClick = onLongTap
             ),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
+        contentAlignment = Alignment.Center
     ) {
-        Text(
-            text = key.digit,
-            style = TextStyle(
-                fontSize = if (key.digit == "*" || key.digit == "#") 34.sp else 32.sp,
-                fontWeight = FontWeight.Normal,
-                color = palette.label,
-                fontFeatureSettings = "tnum"
-            ),
-            lineHeight = if (key.digit == "*" || key.digit == "#") 34.sp else 32.sp
-        )
-        Box(
-            modifier = Modifier.height(14.dp),
-            contentAlignment = Alignment.Center
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
         ) {
-            when {
-                key.digit == "1" -> {
-                    Icon(
-                        imageVector = ApplePhoneIcons.Voicemail,
-                        contentDescription = "Voicemail",
-                        tint = palette.label.copy(alpha = 0.72f),
-                        modifier = Modifier.size(13.dp)
-                    )
-                }
-                key.digit == "0" -> {
-                    Text(
-                        text = "+",
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Normal,
-                        color = palette.label.copy(alpha = 0.75f),
-                        lineHeight = 13.sp
-                    )
-                }
-                key.letters.isNotEmpty() -> {
-                    Text(
-                        text = key.letters,
-                        fontSize = 9.5.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        letterSpacing = 1.4.sp,
-                        color = palette.label.copy(alpha = 0.75f),
-                        maxLines = 1,
-                        lineHeight = 10.sp
-                    )
-                }
-                else -> {
-                    Spacer(modifier = Modifier.height(14.dp))
+            Text(
+                text = key.digit,
+                style = TextStyle(
+                    fontSize = if (key.digit == "*" || key.digit == "#") 34.sp else 32.sp,
+                    fontWeight = FontWeight.Normal,
+                    color = palette.label,
+                    fontFeatureSettings = "tnum"
+                ),
+                lineHeight = if (key.digit == "*" || key.digit == "#") 34.sp else 32.sp
+            )
+            Box(
+                modifier = Modifier.height(14.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                when {
+                    key.digit == "1" -> {
+                        Icon(
+                            imageVector = ApplePhoneIcons.Voicemail,
+                            contentDescription = "Voicemail",
+                            tint = palette.label.copy(alpha = 0.72f),
+                            modifier = Modifier.size(13.dp)
+                        )
+                    }
+                    key.digit == "0" -> {
+                        Text(
+                            text = "+",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Normal,
+                            color = palette.label.copy(alpha = 0.75f),
+                            lineHeight = 13.sp
+                        )
+                    }
+                    key.letters.isNotEmpty() -> {
+                        Text(
+                            text = key.letters,
+                            fontSize = 9.5.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            letterSpacing = 1.4.sp,
+                            color = palette.label.copy(alpha = 0.75f),
+                            maxLines = 1,
+                            lineHeight = 10.sp
+                        )
+                    }
+                    else -> {
+                        Spacer(modifier = Modifier.height(14.dp))
+                    }
                 }
             }
         }
