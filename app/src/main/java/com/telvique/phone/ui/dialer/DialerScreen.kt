@@ -133,59 +133,25 @@ import dev.chrisbanes.haze.blur.hazeBlur
 import dev.chrisbanes.haze.hazeSource
 
 // ── KEYPAD BACKDROP BLUR & LIQUID GLASS TUNING CONSTANTS ───────────────────────
-const val KEYPAD_RAMP_DISTANCE_DP = 160f // Lengthened smooth ramp distance (160dp ending at key row 1 top edge)
+const val KEYPAD_GLASS_TOP_OFFSET_DP = 140f // Blur ramp starts 140dp above key row 1 (no straight boundary)
+const val KEYPAD_RAMP_DISTANCE_DP = 140f // Full ramp transition distance (140dp)
+const val KEYPAD_BACKDROP_BLUR_RADIUS_DP = 56f // Max blur radius (~56dp) at full intensity (48-64dp tunable)
 const val KEYPAD_BACKDROP_DARK_TINT = 0.28f // Max dark tint over backdrop (~28% black, 25-30% tunable)
 const val KEYPAD_BACKDROP_NOISE_FACTOR = 0.06f // Low noise (0.05-0.10) for glass-grain feel
 const val KEYPAD_BACKDROP_INPUT_SCALE = 0.5f // Downscale input content to half-resolution for 60fps performance
 const val KEYPAD_FALLBACK_DARK_TINT = 0.80f // Fallback tint opacity for API < 31 (~80% opacity)
 
-// Stacked blur band radii: 0 (sharp list), 3dp, 8dp, 16dp, 32dp, 56dp (colour blobs)
-const val BLUR_RADIUS_BAND_0_DP = 0f // Sharp list (base LazyColumn)
-const val BLUR_RADIUS_BAND_1_DP = 3f // Band 1: slightly soft (edges lose sharpness)
-const val BLUR_RADIUS_BAND_2_DP = 8f // Band 2: soft blur (characters merge)
-const val BLUR_RADIUS_BAND_3_DP = 16f // Band 3: medium blur (words unreadable)
-const val BLUR_RADIUS_BAND_4_DP = 32f // Band 4: strong blur (shapes merge)
-const val BLUR_RADIUS_BAND_5_DP = 56f // Band 5: full blur (colour blobs)
+// Multi-stop progressive curve: 0 at top, stays below 0.15 for first third of ramp, rising to 1.0 at bottom
+const val KEYPAD_INTENSITY_STOP_0 = 0.00f // at 0.00 (top of ramp: 140dp above row 1, zero blur & zero tint)
+const val KEYPAD_INTENSITY_STOP_1 = 0.03f // at 0.08 (first third of ramp zone: well below 0.15)
+const val KEYPAD_INTENSITY_STOP_2 = 0.12f // at 0.16 (two-thirds of ramp zone)
+const val KEYPAD_INTENSITY_STOP_3 = 0.35f // at 0.26 (key row 1 top edge)
+const val KEYPAD_INTENSITY_STOP_4 = 0.70f // at 0.55 (key row 3/4)
+const val KEYPAD_INTENSITY_STOP_5 = 1.00f // at 1.00 (call button & bottom nav)
 
-// Smooth ease-in intensity curve across 160dp ramp (0.00 at ramp top, rising to 1.00 at key row 1)
-// Note: Maximum rate of change is strictly <= 9% within any 12dp (< 10% constraint)
-const val KEYPAD_RAMP_POS_0 = 0.00f // 0dp: 0% effect (160dp above key row 1)
-const val KEYPAD_RAMP_INTENSITY_0 = 0.00f
-
-const val KEYPAD_RAMP_POS_1 = 0.10f // 16dp: 2% effect
-const val KEYPAD_RAMP_INTENSITY_1 = 0.02f
-
-const val KEYPAD_RAMP_POS_2 = 0.25f // 40dp: 8% effect
-const val KEYPAD_RAMP_INTENSITY_2 = 0.08f
-
-const val KEYPAD_RAMP_POS_3 = 0.45f // 72dp: 20% effect
-const val KEYPAD_RAMP_INTENSITY_3 = 0.20f
-
-const val KEYPAD_RAMP_POS_4 = 0.70f // 112dp: 45% effect
-const val KEYPAD_RAMP_INTENSITY_4 = 0.45f
-
-const val KEYPAD_RAMP_POS_5 = 0.88f // 140dp: 75% effect
-const val KEYPAD_RAMP_INTENSITY_5 = 0.75f
-
-const val KEYPAD_RAMP_POS_6 = 1.00f // 160dp (at key row 1): 100% full strength
-const val KEYPAD_RAMP_INTENSITY_6 = 1.00f
-
-// Row alpha dimming in ramp zone: follows the exact same smooth ease-in curve
-const val KEYPAD_ROW_ALPHA_START = 1.00f // 100% opacity outside ramp
-const val KEYPAD_ROW_ALPHA_AT_ROW1 = 0.55f // 55% opacity at key row 1
-
-// Helper function to evaluate the smooth ease-in ramp intensity curve
-fun computeRampIntensity(fraction: Float): Float {
-    val f = fraction.coerceIn(0f, 1f)
-    return when {
-        f <= KEYPAD_RAMP_POS_1 -> KEYPAD_RAMP_INTENSITY_1 * (f / KEYPAD_RAMP_POS_1)
-        f <= KEYPAD_RAMP_POS_2 -> KEYPAD_RAMP_INTENSITY_1 + (KEYPAD_RAMP_INTENSITY_2 - KEYPAD_RAMP_INTENSITY_1) * ((f - KEYPAD_RAMP_POS_1) / (KEYPAD_RAMP_POS_2 - KEYPAD_RAMP_POS_1))
-        f <= KEYPAD_RAMP_POS_3 -> KEYPAD_RAMP_INTENSITY_2 + (KEYPAD_RAMP_INTENSITY_3 - KEYPAD_RAMP_INTENSITY_2) * ((f - KEYPAD_RAMP_POS_2) / (KEYPAD_RAMP_POS_3 - KEYPAD_RAMP_POS_2))
-        f <= KEYPAD_RAMP_POS_4 -> KEYPAD_RAMP_INTENSITY_3 + (KEYPAD_RAMP_INTENSITY_4 - KEYPAD_RAMP_INTENSITY_3) * ((f - KEYPAD_RAMP_POS_3) / (KEYPAD_RAMP_POS_4 - KEYPAD_RAMP_POS_3))
-        f <= KEYPAD_RAMP_POS_5 -> KEYPAD_RAMP_INTENSITY_4 + (KEYPAD_RAMP_INTENSITY_5 - KEYPAD_RAMP_INTENSITY_4) * ((f - KEYPAD_RAMP_POS_4) / (KEYPAD_RAMP_POS_5 - KEYPAD_RAMP_POS_4))
-        else -> KEYPAD_RAMP_INTENSITY_5 + (KEYPAD_RAMP_INTENSITY_6 - KEYPAD_RAMP_INTENSITY_5) * ((f - KEYPAD_RAMP_POS_5) / (KEYPAD_RAMP_POS_6 - KEYPAD_RAMP_POS_5))
-    }
-}
+// Row alpha fade in ramp zone: 100% (1.0f) at start of ramp down to 55% (0.55f) at key row 1
+const val KEYPAD_ROW_ALPHA_START = 1.00f
+const val KEYPAD_ROW_ALPHA_AT_ROW1 = 0.55f
 
 // Flat liquid-glass key constants: 6-9% alpha flat fill, no bulky center sphere, low refraction & dispersion
 const val KEYPAD_KEY_FILL_ALPHA_TOP = 0.08f // Translucent white fill top (~8% in dark mode, range 6-9%)
@@ -430,8 +396,9 @@ fun DialerScreen(
         // Extends underneath the keypad when input is empty;
         // Ends above the number display when input is not empty.
         val rampDistancePx = with(density) { KEYPAD_RAMP_DISTANCE_DP.dp.toPx() }
+        val glassTopOffsetPx = maxOf(0f, keyGridTopInPanelPx - rampDistancePx)
+        val rampTopInRootPx = if (panelTopInRootPx > 0f) panelTopInRootPx + glassTopOffsetPx else 0f
         val keyRow1InRootPx = if (panelTopInRootPx > 0f) panelTopInRootPx + keyGridTopInPanelPx else 0f
-        val rampTopInRootPx = if (keyRow1InRootPx > 0f) (keyRow1InRootPx - rampDistancePx).coerceAtLeast(0f) else 0f
 
         LazyColumn(
             state = listState,
@@ -651,287 +618,7 @@ fun DialerScreen(
             }
         }
 
-        // Layer 1: Backdrop Glass Layer with stacked blur bands (3dp, 8dp, 16dp, 32dp, 56dp)
-        // Extends 160dp above key row 1 and down to the bottom of the screen
-        val glassHeightPx = if (keypadPanelHeightPx > 0) {
-            (keypadPanelHeightPx - keyGridTopInPanelPx + rampDistancePx).coerceAtLeast(0f)
-        } else 0f
-
-        if (glassHeightPx > 0f) {
-            val isAndroid12OrAbove = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
-            val rampFraction = (rampDistancePx / glassHeightPx).coerceIn(0f, 1f)
-
-            // Overlapping smooth gradient masks for the 5 blur bands:
-            // Band 1: slightly soft (3dp blur)
-            val band1Style = remember(rampFraction) {
-                HazeBlurStyle {
-                    blurEnabled(true)
-                    backgroundColor(Color.Transparent)
-                    blurRadius(BLUR_RADIUS_BAND_1_DP.dp)
-                    noiseFactor(0f)
-                    mask(
-                        Brush.verticalGradient(
-                            0.00f * rampFraction to Color.Transparent,
-                            0.08f * rampFraction to Color.Black.copy(alpha = 0.50f),
-                            0.16f * rampFraction to Color.Black,
-                            0.24f * rampFraction to Color.Black,
-                            0.32f * rampFraction to Color.Black.copy(alpha = 0.40f),
-                            0.40f * rampFraction to Color.Transparent,
-                            1.00f to Color.Transparent
-                        )
-                    )
-                }
-            }
-
-            // Band 2: soft blur (8dp blur)
-            val band2Style = remember(rampFraction) {
-                HazeBlurStyle {
-                    blurEnabled(true)
-                    backgroundColor(Color.Transparent)
-                    blurRadius(BLUR_RADIUS_BAND_2_DP.dp)
-                    noiseFactor(0f)
-                    mask(
-                        Brush.verticalGradient(
-                            0.00f * rampFraction to Color.Transparent,
-                            0.20f * rampFraction to Color.Transparent,
-                            0.30f * rampFraction to Color.Black.copy(alpha = 0.60f),
-                            0.38f * rampFraction to Color.Black,
-                            0.46f * rampFraction to Color.Black,
-                            0.56f * rampFraction to Color.Black.copy(alpha = 0.40f),
-                            0.64f * rampFraction to Color.Transparent,
-                            1.00f to Color.Transparent
-                        )
-                    )
-                }
-            }
-
-            // Band 3: medium blur (16dp blur)
-            val band3Style = remember(rampFraction) {
-                HazeBlurStyle {
-                    blurEnabled(true)
-                    backgroundColor(Color.Transparent)
-                    blurRadius(BLUR_RADIUS_BAND_3_DP.dp)
-                    noiseFactor(0f)
-                    mask(
-                        Brush.verticalGradient(
-                            0.00f * rampFraction to Color.Transparent,
-                            0.42f * rampFraction to Color.Transparent,
-                            0.52f * rampFraction to Color.Black.copy(alpha = 0.60f),
-                            0.60f * rampFraction to Color.Black,
-                            0.68f * rampFraction to Color.Black,
-                            0.78f * rampFraction to Color.Black.copy(alpha = 0.40f),
-                            0.84f * rampFraction to Color.Transparent,
-                            1.00f to Color.Transparent
-                        )
-                    )
-                }
-            }
-
-            // Band 4: strong blur (32dp blur)
-            val band4Style = remember(rampFraction) {
-                HazeBlurStyle {
-                    blurEnabled(true)
-                    backgroundColor(Color.Transparent)
-                    blurRadius(BLUR_RADIUS_BAND_4_DP.dp)
-                    noiseFactor(0f)
-                    mask(
-                        Brush.verticalGradient(
-                            0.00f * rampFraction to Color.Transparent,
-                            0.62f * rampFraction to Color.Transparent,
-                            0.72f * rampFraction to Color.Black.copy(alpha = 0.60f),
-                            0.80f * rampFraction to Color.Black,
-                            0.88f * rampFraction to Color.Black,
-                            0.94f * rampFraction to Color.Black.copy(alpha = 0.40f),
-                            0.98f * rampFraction to Color.Transparent,
-                            1.00f to Color.Transparent
-                        )
-                    )
-                }
-            }
-
-            // Band 5: full blur (56dp blur, colour blobs)
-            val band5Style = remember(rampFraction) {
-                HazeBlurStyle {
-                    blurEnabled(true)
-                    backgroundColor(Color.Transparent)
-                    blurRadius(BLUR_RADIUS_BAND_5_DP.dp)
-                    noiseFactor(KEYPAD_BACKDROP_NOISE_FACTOR)
-                    mask(
-                        Brush.verticalGradient(
-                            0.00f * rampFraction to Color.Transparent,
-                            0.78f * rampFraction to Color.Transparent,
-                            0.88f * rampFraction to Color.Black.copy(alpha = 0.45f),
-                            0.96f * rampFraction to Color.Black.copy(alpha = 0.85f),
-                            1.00f * rampFraction to Color.Black,
-                            1.00f to Color.Black
-                        )
-                    )
-                }
-            }
-
-            // Smooth ease-in dark tint scrim
-            val tintScrimBrush = remember(rampFraction) {
-                Brush.verticalGradient(
-                    0.00f * rampFraction to Color.Black.copy(alpha = KEYPAD_BACKDROP_DARK_TINT * KEYPAD_RAMP_INTENSITY_0),
-                    KEYPAD_RAMP_POS_1 * rampFraction to Color.Black.copy(alpha = KEYPAD_BACKDROP_DARK_TINT * KEYPAD_RAMP_INTENSITY_1),
-                    KEYPAD_RAMP_POS_2 * rampFraction to Color.Black.copy(alpha = KEYPAD_BACKDROP_DARK_TINT * KEYPAD_RAMP_INTENSITY_2),
-                    KEYPAD_RAMP_POS_3 * rampFraction to Color.Black.copy(alpha = KEYPAD_BACKDROP_DARK_TINT * KEYPAD_RAMP_INTENSITY_3),
-                    KEYPAD_RAMP_POS_4 * rampFraction to Color.Black.copy(alpha = KEYPAD_BACKDROP_DARK_TINT * KEYPAD_RAMP_INTENSITY_4),
-                    KEYPAD_RAMP_POS_5 * rampFraction to Color.Black.copy(alpha = KEYPAD_BACKDROP_DARK_TINT * KEYPAD_RAMP_INTENSITY_5),
-                    KEYPAD_RAMP_POS_6 * rampFraction to Color.Black.copy(alpha = KEYPAD_BACKDROP_DARK_TINT * KEYPAD_RAMP_INTENSITY_6),
-                    1.00f to Color.Black.copy(alpha = KEYPAD_BACKDROP_DARK_TINT)
-                )
-            }
-
-            // Fallback tint gradient for API < 31
-            val fallbackTintBrush = remember(rampFraction) {
-                Brush.verticalGradient(
-                    0.00f * rampFraction to Color.Black.copy(alpha = KEYPAD_FALLBACK_DARK_TINT * KEYPAD_RAMP_INTENSITY_0),
-                    KEYPAD_RAMP_POS_1 * rampFraction to Color.Black.copy(alpha = KEYPAD_FALLBACK_DARK_TINT * KEYPAD_RAMP_INTENSITY_1),
-                    KEYPAD_RAMP_POS_2 * rampFraction to Color.Black.copy(alpha = KEYPAD_FALLBACK_DARK_TINT * KEYPAD_RAMP_INTENSITY_2),
-                    KEYPAD_RAMP_POS_3 * rampFraction to Color.Black.copy(alpha = KEYPAD_FALLBACK_DARK_TINT * KEYPAD_RAMP_INTENSITY_3),
-                    KEYPAD_RAMP_POS_4 * rampFraction to Color.Black.copy(alpha = KEYPAD_FALLBACK_DARK_TINT * KEYPAD_RAMP_INTENSITY_4),
-                    KEYPAD_RAMP_POS_5 * rampFraction to Color.Black.copy(alpha = KEYPAD_FALLBACK_DARK_TINT * KEYPAD_RAMP_INTENSITY_5),
-                    KEYPAD_RAMP_POS_6 * rampFraction to Color.Black.copy(alpha = KEYPAD_FALLBACK_DARK_TINT * KEYPAD_RAMP_INTENSITY_6),
-                    1.00f to Color.Black.copy(alpha = KEYPAD_FALLBACK_DARK_TINT)
-                )
-            }
-
-            val keyRadiusPx = with(density) { 38.dp.toPx() }
-            val keyCentersArray = remember(panelWidthPx, density, rampDistancePx) { FloatArray(24) }
-
-            // Compute exact center coordinates of all 12 keys relative to the glass container
-            if (panelWidthPx > 0f) {
-                val gridSidePaddingPx = with(density) { 20.dp.toPx() }
-                val rowWidthPx = panelWidthPx - gridSidePaddingPx * 2f
-                val keyDiameterPx = keyRadiusPx * 2f
-                val availableSpacePx = rowWidthPx - (keyDiameterPx * 3f)
-                val gapPx = availableSpacePx / 4f
-
-                val cx0 = gridSidePaddingPx + gapPx + keyRadiusPx
-                val cx1 = panelWidthPx / 2f
-                val cx2 = panelWidthPx - cx0
-
-                val cy0 = rampDistancePx + keyRadiusPx
-                val rowStepPx = with(density) { (76.dp + 8.dp).toPx() }
-
-                for (r in 0 until 4) {
-                    val cy = cy0 + r * rowStepPx
-                    keyCentersArray[(r * 3 + 0) * 2] = cx0
-                    keyCentersArray[(r * 3 + 0) * 2 + 1] = cy
-                    keyCentersArray[(r * 3 + 1) * 2] = cx1
-                    keyCentersArray[(r * 3 + 1) * 2 + 1] = cy
-                    keyCentersArray[(r * 3 + 2) * 2] = cx2
-                    keyCentersArray[(r * 3 + 2) * 2 + 1] = cy
-                }
-            }
-
-            Box(
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .fillMaxWidth()
-                    .height(with(density) { glassHeightPx.toDp() })
-                    .then(
-                        if (isAndroid12OrAbove) {
-                            Modifier
-                        } else {
-                            Modifier.background(fallbackTintBrush)
-                        }
-                    )
-                    .then(
-                        if (isLiquidShaderCapable) {
-                            Modifier.graphicsLayer {
-                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && size.width > 0f && size.height > 0f) {
-                                    val shader = KeypadLiquidGlassShader.getOrCreateShader()
-                                    if (shader != null) {
-                                        shader.setFloatUniform("uSize", size.width, size.height)
-                                        shader.setFloatUniform("uKeyRadius", keyRadiusPx)
-                                        shader.setFloatUniform("uKeyCenters", keyCentersArray)
-                                        shader.setFloatUniform("uRefraction", KEYPAD_REFRACTION_STRENGTH)
-                                        shader.setFloatUniform("uDispersion", KEYPAD_DISPERSION_STRENGTH)
-                                        shader.setFloatUniform("uSpecular", KEYPAD_SPECULAR_STRENGTH)
-                                        shader.setFloatUniform("uFadeTopPx", 0f)
-                                        shader.setFloatUniform("uDarkTheme", if (palette.isDark) 1f else 0f)
-                                        shader.setFloatUniform("uDarkTint", 0f)
-                                        shader.setFloatUniform("uPressedIndex", pressedKeyIndex.toFloat())
-                                        shader.setFloatUniform("uPressedProgress", pressedKeyProgress)
-
-                                        renderEffect = RenderEffect.createRuntimeShaderEffect(
-                                            shader,
-                                            "content"
-                                        ).asComposeRenderEffect()
-                                    } else {
-                                        renderEffect = null
-                                    }
-                                } else {
-                                    renderEffect = null
-                                }
-                            }
-                        } else Modifier
-                    )
-            ) {
-                if (isAndroid12OrAbove) {
-                    // Band 1: slightly soft (3dp blur)
-                    Box(
-                        modifier = Modifier
-                            .matchParentSize()
-                            .hazeBlur(
-                                input = HazeInput.Sources(hazeState),
-                                style = band1Style,
-                                performanceMode = HazePerformanceMode.Fixed(KEYPAD_BACKDROP_INPUT_SCALE)
-                            )
-                    )
-                    // Band 2: soft blur (8dp blur)
-                    Box(
-                        modifier = Modifier
-                            .matchParentSize()
-                            .hazeBlur(
-                                input = HazeInput.Sources(hazeState),
-                                style = band2Style,
-                                performanceMode = HazePerformanceMode.Fixed(KEYPAD_BACKDROP_INPUT_SCALE)
-                            )
-                    )
-                    // Band 3: medium blur (16dp blur)
-                    Box(
-                        modifier = Modifier
-                            .matchParentSize()
-                            .hazeBlur(
-                                input = HazeInput.Sources(hazeState),
-                                style = band3Style,
-                                performanceMode = HazePerformanceMode.Fixed(KEYPAD_BACKDROP_INPUT_SCALE)
-                            )
-                    )
-                    // Band 4: strong blur (32dp blur)
-                    Box(
-                        modifier = Modifier
-                            .matchParentSize()
-                            .hazeBlur(
-                                input = HazeInput.Sources(hazeState),
-                                style = band4Style,
-                                performanceMode = HazePerformanceMode.Fixed(KEYPAD_BACKDROP_INPUT_SCALE)
-                            )
-                    )
-                    // Band 5: full blur (56dp blur, colour blobs)
-                    Box(
-                        modifier = Modifier
-                            .matchParentSize()
-                            .hazeBlur(
-                                input = HazeInput.Sources(hazeState),
-                                style = band5Style,
-                                performanceMode = HazePerformanceMode.Fixed(KEYPAD_BACKDROP_INPUT_SCALE)
-                            )
-                    )
-                    // Smooth ease-in dark tint scrim
-                    Box(
-                        modifier = Modifier
-                            .matchParentSize()
-                            .background(tintScrimBrush)
-                    )
-                }
-            }
-        }
-
-        // Layer 2: Keypad Foreground Panel (keys, numbers, call button)
+        // Layer 1: Keypad Panel anchored at bottom with AGSL liquid-glass backdrop
         Box(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
@@ -944,6 +631,136 @@ fun DialerScreen(
                     keypadPanelHeightPx = coords.size.height
                 }
         ) {
+            // Glass region starts 140dp above the top edge of key row 1 (no straight boundary)
+            val glassTopOffsetPx = maxOf(0f, keyGridTopInPanelPx - with(density) { KEYPAD_GLASS_TOP_OFFSET_DP.dp.toPx() })
+            val glassHeightPx = (keypadPanelHeightPx - glassTopOffsetPx).coerceAtLeast(0f)
+            val glassTopInRootPx = panelTopInRootPx + glassTopOffsetPx
+
+            // ── HAZE BACKDROP BLUR OVER KEYPAD REGION (WITH PROGRESSIVE FADE & LIQUID GLASS KEY SHADER) ──
+            if (glassHeightPx > 0f) {
+                val isAndroid12OrAbove = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+                val progressiveBrush = remember {
+                    Brush.verticalGradient(
+                        0.00f to Color.Black.copy(alpha = KEYPAD_INTENSITY_STOP_0),
+                        0.08f to Color.Black.copy(alpha = KEYPAD_INTENSITY_STOP_1),
+                        0.16f to Color.Black.copy(alpha = KEYPAD_INTENSITY_STOP_2),
+                        0.26f to Color.Black.copy(alpha = KEYPAD_INTENSITY_STOP_3),
+                        0.55f to Color.Black.copy(alpha = KEYPAD_INTENSITY_STOP_4),
+                        1.00f to Color.Black.copy(alpha = KEYPAD_INTENSITY_STOP_5)
+                    )
+                }
+                val tintScrimBrush = remember {
+                    Brush.verticalGradient(
+                        0.00f to Color.Black.copy(alpha = KEYPAD_BACKDROP_DARK_TINT * KEYPAD_INTENSITY_STOP_0),
+                        0.08f to Color.Black.copy(alpha = KEYPAD_BACKDROP_DARK_TINT * KEYPAD_INTENSITY_STOP_1),
+                        0.16f to Color.Black.copy(alpha = KEYPAD_BACKDROP_DARK_TINT * KEYPAD_INTENSITY_STOP_2),
+                        0.26f to Color.Black.copy(alpha = KEYPAD_BACKDROP_DARK_TINT * KEYPAD_INTENSITY_STOP_3),
+                        0.55f to Color.Black.copy(alpha = KEYPAD_BACKDROP_DARK_TINT * KEYPAD_INTENSITY_STOP_4),
+                        1.00f to Color.Black.copy(alpha = KEYPAD_BACKDROP_DARK_TINT * KEYPAD_INTENSITY_STOP_5)
+                    )
+                }
+                val keypadHazeStyle = remember(progressiveBrush) {
+                    HazeBlurStyle {
+                        blurEnabled(true)
+                        backgroundColor(Color.Transparent)
+                        blurRadius(KEYPAD_BACKDROP_BLUR_RADIUS_DP.dp)
+                        noiseFactor(KEYPAD_BACKDROP_NOISE_FACTOR)
+                        progressive(HazeProgressive.Brush(progressiveBrush))
+                    }
+                }
+
+                val keyRadiusPx = with(density) { 38.dp.toPx() }
+                val keyCentersArray = remember(panelWidthPx, density) { FloatArray(24) }
+
+                // Compute exact center coordinates of all 12 keys relative to the glass region
+                if (panelWidthPx > 0f) {
+                    val gridSidePaddingPx = with(density) { 20.dp.toPx() }
+                    val rowWidthPx = panelWidthPx - gridSidePaddingPx * 2f
+                    val keyDiameterPx = keyRadiusPx * 2f
+                    val availableSpacePx = rowWidthPx - (keyDiameterPx * 3f)
+                    val gapPx = availableSpacePx / 4f
+
+                    val cx0 = gridSidePaddingPx + gapPx + keyRadiusPx
+                    val cx1 = panelWidthPx / 2f
+                    val cx2 = panelWidthPx - cx0
+
+                    val cy0 = with(density) { KEYPAD_GLASS_TOP_OFFSET_DP.dp.toPx() } + keyRadiusPx
+                    val rowStepPx = with(density) { (76.dp + 8.dp).toPx() }
+
+                    for (r in 0 until 4) {
+                        val cy = cy0 + r * rowStepPx
+                        keyCentersArray[(r * 3 + 0) * 2] = cx0
+                        keyCentersArray[(r * 3 + 0) * 2 + 1] = cy
+                        keyCentersArray[(r * 3 + 1) * 2] = cx1
+                        keyCentersArray[(r * 3 + 1) * 2 + 1] = cy
+                        keyCentersArray[(r * 3 + 2) * 2] = cx2
+                        keyCentersArray[(r * 3 + 2) * 2 + 1] = cy
+                    }
+                }
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(with(density) { glassHeightPx.toDp() })
+                        .align(Alignment.BottomCenter)
+                        // No clipToBounds() to prevent any straight edge boundary
+                        .then(
+                            if (isAndroid12OrAbove) {
+                                Modifier
+                                    .hazeBlur(
+                                        input = HazeInput.Sources(hazeState),
+                                        style = keypadHazeStyle,
+                                        performanceMode = HazePerformanceMode.Fixed(KEYPAD_BACKDROP_INPUT_SCALE)
+                                    )
+                                    .background(tintScrimBrush)
+                            } else {
+                                Modifier.background(
+                                    Brush.verticalGradient(
+                                        0.00f to Color.Black.copy(alpha = KEYPAD_FALLBACK_DARK_TINT * KEYPAD_INTENSITY_STOP_0),
+                                        0.08f to Color.Black.copy(alpha = KEYPAD_FALLBACK_DARK_TINT * KEYPAD_INTENSITY_STOP_1),
+                                        0.16f to Color.Black.copy(alpha = KEYPAD_FALLBACK_DARK_TINT * KEYPAD_INTENSITY_STOP_2),
+                                        0.26f to Color.Black.copy(alpha = KEYPAD_FALLBACK_DARK_TINT * KEYPAD_INTENSITY_STOP_3),
+                                        0.55f to Color.Black.copy(alpha = KEYPAD_FALLBACK_DARK_TINT * KEYPAD_INTENSITY_STOP_4),
+                                        1.00f to Color.Black.copy(alpha = KEYPAD_FALLBACK_DARK_TINT * KEYPAD_INTENSITY_STOP_5)
+                                    )
+                                )
+                            }
+                        )
+                        .then(
+                            if (isLiquidShaderCapable) {
+                                Modifier.graphicsLayer {
+                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && size.width > 0f && size.height > 0f) {
+                                        val shader = KeypadLiquidGlassShader.getOrCreateShader()
+                                        if (shader != null) {
+                                            shader.setFloatUniform("uSize", size.width, size.height)
+                                            shader.setFloatUniform("uKeyRadius", keyRadiusPx)
+                                            shader.setFloatUniform("uKeyCenters", keyCentersArray)
+                                            shader.setFloatUniform("uRefraction", KEYPAD_REFRACTION_STRENGTH)
+                                            shader.setFloatUniform("uDispersion", KEYPAD_DISPERSION_STRENGTH)
+                                            shader.setFloatUniform("uSpecular", KEYPAD_SPECULAR_STRENGTH)
+                                            shader.setFloatUniform("uFadeTopPx", 0f)
+                                            shader.setFloatUniform("uDarkTheme", if (palette.isDark) 1f else 0f)
+                                            shader.setFloatUniform("uDarkTint", 0f)
+                                            shader.setFloatUniform("uPressedIndex", pressedKeyIndex.toFloat())
+                                            shader.setFloatUniform("uPressedProgress", pressedKeyProgress)
+
+                                            renderEffect = RenderEffect.createRuntimeShaderEffect(
+                                                shader,
+                                                "content"
+                                            ).asComposeRenderEffect()
+                                        } else {
+                                            renderEffect = null
+                                        }
+                                    } else {
+                                        renderEffect = null
+                                    }
+                                }
+                            } else {
+                                Modifier
+                            }
+                        )
+                )
+            }
 
             // Keypad foreground controls (keys, digits, and letters sit ABOVE the glass layer)
             Column(
@@ -1338,8 +1155,7 @@ private fun DialerGroupedRecentCallRow(
                     KEYPAD_ROW_ALPHA_AT_ROW1
                 } else {
                     val fraction = ((rowCenterInRoot - rampTopInRootPx) / rampDistancePx).coerceIn(0f, 1f)
-                    val intensity = computeRampIntensity(fraction)
-                    KEYPAD_ROW_ALPHA_START + (KEYPAD_ROW_ALPHA_AT_ROW1 - KEYPAD_ROW_ALPHA_START) * intensity
+                    KEYPAD_ROW_ALPHA_START + (KEYPAD_ROW_ALPHA_AT_ROW1 - KEYPAD_ROW_ALPHA_START) * fraction
                 }
             }
         }
@@ -1849,8 +1665,7 @@ private fun DialerContactMatchRow(
                     KEYPAD_ROW_ALPHA_AT_ROW1
                 } else {
                     val fraction = ((rowCenterInRoot - rampTopInRootPx) / rampDistancePx).coerceIn(0f, 1f)
-                    val intensity = computeRampIntensity(fraction)
-                    KEYPAD_ROW_ALPHA_START + (KEYPAD_ROW_ALPHA_AT_ROW1 - KEYPAD_ROW_ALPHA_START) * intensity
+                    KEYPAD_ROW_ALPHA_START + (KEYPAD_ROW_ALPHA_AT_ROW1 - KEYPAD_ROW_ALPHA_START) * fraction
                 }
             }
         }
