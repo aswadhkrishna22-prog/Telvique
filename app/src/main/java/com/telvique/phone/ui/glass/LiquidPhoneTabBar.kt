@@ -510,8 +510,8 @@ fun LiquidCircularGlassButton(
             .then(glassModifier)
             .clip(CircleShape)
             .drawBehind {
-                val w = size.width
-                val h = size.height
+                val w = this.size.width
+                val h = this.size.height
                 val rimGlowAlpha = if (isDark) 0.10f else 0.20f
                 drawCircle(
                     brush = Brush.linearGradient(
