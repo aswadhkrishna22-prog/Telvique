@@ -337,10 +337,9 @@ private fun CallScreen(
     } else null
 
     val isDualSim = remember(context) {
-        val simCount = runCatching {
-            ContextCompat.getSystemService(context, android.telephony.SubscriptionManager::class.java)?.activeSubscriptionInfoCount ?: 0
-        }.getOrDefault(0)
-        simCount > 1 || PhoneRepository(context).getSimAccounts().size > 1
+        runCatching {
+            PhoneRepository(context).getSimAccounts().size > 1
+        }.getOrDefault(false)
     }
 
     val ringingEntranceAnim = remember { Animatable(0f) }
