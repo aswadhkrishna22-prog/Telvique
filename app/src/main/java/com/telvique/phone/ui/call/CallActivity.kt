@@ -1014,6 +1014,7 @@ private fun VerifyCallerSheet(
     var searchQuery by remember { mutableStateOf("") }
     var contactForNumberSelection by remember { mutableStateOf<ContactItem?>(null) }
     var isLoading by remember { mutableStateOf(false) }
+    val noNumberMessage = stringResource(R.string.verify_caller_no_number)
 
     LaunchedEffect(hasContactsPermission) {
         if (hasContactsPermission) {
@@ -1197,7 +1198,7 @@ private fun VerifyCallerSheet(
                                                 Toast
                                                     .makeText(
                                                         context,
-                                                        context.getString(R.string.verify_caller_no_number),
+                                                        noNumberMessage,
                                                         Toast.LENGTH_SHORT
                                                     )
                                                     .show()
