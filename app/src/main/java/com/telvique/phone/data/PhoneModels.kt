@@ -328,3 +328,36 @@ object T9Matcher {
         }
     }
 }
+
+object SlideToAnswerUtils {
+    const val DEFAULT_HOLD_DURATION_MS = 1000L
+    const val COMPLETION_THRESHOLD_RATIO = 0.72f
+
+    fun calculateProgress(elapsedMs: Long, totalDurationMs: Long = DEFAULT_HOLD_DURATION_MS): Float {
+        if (totalDurationMs <= 0L) return 1f
+        return (elapsedMs.toFloat() / totalDurationMs.toFloat()).coerceIn(0f, 1f)
+    }
+
+    fun isHoldCompleted(elapsedMs: Long, totalDurationMs: Long = DEFAULT_HOLD_DURATION_MS): Boolean {
+        return elapsedMs >= totalDurationMs
+    }
+
+    fun calculateSweepAngle(progress: Float): Float {
+        return (progress.coerceIn(0f, 1f) * 360f)
+    }
+
+    fun shouldCancelHoldForMovement(distancePx: Float, touchSlopPx: Float): Boolean {
+        return distancePx > touchSlopPx
+    }
+
+    fun isSlideAnswerThresholdReached(offsetPx: Float, maxDragPx: Float, thresholdRatio: Float = COMPLETION_THRESHOLD_RATIO): Boolean {
+        val threshold = maxDragPx * thresholdRatio
+        return offsetPx >= threshold
+    }
+
+    fun calculateTextAlpha(offsetPx: Float, maxDragPx: Float): Float {
+        if (maxDragPx <= 0f) return 0f
+        return (1f - (offsetPx / maxDragPx) * 1.5f).coerceIn(0f, 1f)
+    }
+}
+

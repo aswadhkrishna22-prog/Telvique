@@ -19,4 +19,9 @@
     <string name="verify_caller_choose_number_title">Choose a number</string>
     <string name="verify_caller_empty_search">No contacts found</string>
     <string name="verify_caller_loading">Loading contacts…</string>
+
+    <!-- Incoming Call Slider -->
+    <string name="slide_to_answer_talkback_description">Incoming call slider. Slide to answer or hold handle to decline.</string>
+    <string name="action_answer_call">Answer incoming call</string>
+    <string name="action_decline_call">Decline incoming call</string>
 </resources>

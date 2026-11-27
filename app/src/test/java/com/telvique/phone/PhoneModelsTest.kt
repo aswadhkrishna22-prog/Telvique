@@ -5,6 +5,7 @@ import com.telvique.phone.data.CallLogType
 import com.telvique.phone.data.ContactItem
 import com.telvique.phone.data.PhoneFormatUtils
 import com.telvique.phone.data.PhoneNumberEntry
+import com.telvique.phone.data.SlideToAnswerUtils
 import com.telvique.phone.data.T9Matcher
 import com.telvique.phone.data.groupConsecutiveCallLogs
 import org.junit.Assert.assertEquals
@@ -167,5 +168,61 @@ class PhoneModelsTest {
         assertEquals(0.25f, textAlpha(300f), 0.001f)
         assertEquals(0.0f, textAlpha(450f), 0.001f)
         assertEquals(0.0f, textAlpha(600f), 0.001f)
+    }
+
+    @Test
+    fun longPressToDecline_durationAndProgressCalculations() {
+        assertEquals(1000L, SlideToAnswerUtils.DEFAULT_HOLD_DURATION_MS)
+
+        // Progress calculations
+        assertEquals(0.0f, SlideToAnswerUtils.calculateProgress(0L), 0.001f)
+        assertEquals(0.25f, SlideToAnswerUtils.calculateProgress(250L), 0.001f)
+        assertEquals(0.5f, SlideToAnswerUtils.calculateProgress(500L), 0.001f)
+        assertEquals(1.0f, SlideToAnswerUtils.calculateProgress(1000L), 0.001f)
+        assertEquals(1.0f, SlideToAnswerUtils.calculateProgress(1500L), 0.001f) // Clamped at 1.0f
+
+        // Hold completion detection
+        assertFalse(SlideToAnswerUtils.isHoldCompleted(0L))
+        assertFalse(SlideToAnswerUtils.isHoldCompleted(999L))
+        assertTrue(SlideToAnswerUtils.isHoldCompleted(1000L))
+        assertTrue(SlideToAnswerUtils.isHoldCompleted(1200L))
+
+        // Sweep angle calculations for the circular progress arc
+        assertEquals(0f, SlideToAnswerUtils.calculateSweepAngle(0.0f), 0.001f)
+        assertEquals(90f, SlideToAnswerUtils.calculateSweepAngle(0.25f), 0.001f)
+        assertEquals(180f, SlideToAnswerUtils.calculateSweepAngle(0.5f), 0.001f)
+        assertEquals(270f, SlideToAnswerUtils.calculateSweepAngle(0.75f), 0.001f)
+        assertEquals(360f, SlideToAnswerUtils.calculateSweepAngle(1.0f), 0.001f)
+        assertEquals(360f, SlideToAnswerUtils.calculateSweepAngle(1.2f), 0.001f) // Clamped
+    }
+
+    @Test
+    fun longPressToDecline_touchSlopAndCancellation() {
+        val touchSlopPx = 16f
+
+        // Movement within touch slop does NOT cancel hold
+        assertFalse(SlideToAnswerUtils.shouldCancelHoldForMovement(0f, touchSlopPx))
+        assertFalse(SlideToAnswerUtils.shouldCancelHoldForMovement(8f, touchSlopPx))
+        assertFalse(SlideToAnswerUtils.shouldCancelHoldForMovement(16f, touchSlopPx))
+
+        // Movement exceeding touch slop cancels hold immediately
+        assertTrue(SlideToAnswerUtils.shouldCancelHoldForMovement(16.1f, touchSlopPx))
+        assertTrue(SlideToAnswerUtils.shouldCancelHoldForMovement(30f, touchSlopPx))
+    }
+
+    @Test
+    fun slideToAnswerUtils_thresholdAndAlphaCalculations() {
+        val maxDragPx = 600f
+
+        // Slide answer threshold
+        assertFalse(SlideToAnswerUtils.isSlideAnswerThresholdReached(400f, maxDragPx))
+        assertTrue(SlideToAnswerUtils.isSlideAnswerThresholdReached(maxDragPx * 0.72f, maxDragPx))
+        assertTrue(SlideToAnswerUtils.isSlideAnswerThresholdReached(500f, maxDragPx))
+
+        // Text alpha calculations
+        assertEquals(1.0f, SlideToAnswerUtils.calculateTextAlpha(0f, maxDragPx), 0.001f)
+        assertEquals(0.25f, SlideToAnswerUtils.calculateTextAlpha(300f, maxDragPx), 0.001f)
+        assertEquals(0.0f, SlideToAnswerUtils.calculateTextAlpha(450f, maxDragPx), 0.001f)
+        assertEquals(0.0f, SlideToAnswerUtils.calculateTextAlpha(600f, maxDragPx), 0.001f)
     }
 }
