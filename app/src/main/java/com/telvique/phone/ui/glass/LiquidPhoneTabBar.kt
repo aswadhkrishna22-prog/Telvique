@@ -173,7 +173,7 @@ fun LiquidPhoneTabBar(
     val activeInk = palette.accentBlue
     val pageColor = palette.background
     val surfaceColor = palette.cardSurface
-    val railTint = if (isDark) Color(0xFF111319).copy(alpha = 0.32f) else Color.White.copy(alpha = 0.30f)
+    val railTint = if (isDark) Color(0xFF14161F).copy(alpha = 0.72f) else Color(0xFFF6F6F9).copy(alpha = 0.78f)
     val railState = if (useRealLiquid) rememberLiquidState() else null
     val railHeight = 58.dp
     val pressedScale = railHeight.value / (railHeight.value - 8f)
@@ -245,8 +245,8 @@ fun LiquidPhoneTabBar(
                 Box(
                     Modifier
                         .matchParentSize()
-                        .background(surfaceColor, CircleShape)
-                        .navigationRail(liquidState, railTint, blurRadius = 1.5.dp),
+                        .background(surfaceColor.copy(alpha = if (isDark) 0.65f else 0.75f), CircleShape)
+                        .navigationRail(liquidState, railTint, blurRadius = 26.dp),
                 )
                 PhoneNavigationGlyphs(
                     items = items,
@@ -262,8 +262,8 @@ fun LiquidPhoneTabBar(
             Box(
                 Modifier
                     .matchParentSize()
-                    .background(surfaceColor, CircleShape)
-                    .navigationRail(liquidState, railTint),
+                    .background(surfaceColor.copy(alpha = if (isDark) 0.65f else 0.75f), CircleShape)
+                    .navigationRail(liquidState, railTint, blurRadius = 26.dp),
             )
         } else {
             Box(
@@ -273,7 +273,8 @@ fun LiquidPhoneTabBar(
                         shape = CircleShape,
                         hazeState = null,
                         isDark = isDark,
-                        blurRadius = 12.dp,
+                        blurRadius = 24.dp,
+                        tintAlpha = if (isDark) 0.52f else 0.78f,
                         shadowElevation = 0.dp,
                     ),
             )
@@ -656,7 +657,7 @@ private fun Modifier.captureHeadroom(padding: Dp): Modifier = layout { measurabl
     layout(width, height) { placeable.place(-inset, -inset) }
 }
 
-private fun Modifier.navigationRail(state: LiquidState, color: Color, blurRadius: Dp = 12.dp): Modifier =
+private fun Modifier.navigationRail(state: LiquidState, color: Color, blurRadius: Dp = 26.dp): Modifier =
     liquid(state) {
         shape = CircleShape
         frost = blurRadius

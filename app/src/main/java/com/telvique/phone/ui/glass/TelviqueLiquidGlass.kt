@@ -350,9 +350,9 @@ fun Modifier.clearLiquidGlassPill(
     shadowElevation: Dp = 6.dp,
 ): Modifier = composed {
     val glassTint = if (isDark) {
-        Color(0xFF1C1C1E).copy(alpha = tintAlpha + 0.28f)
+        Color(0xFF1C1C1E).copy(alpha = (tintAlpha + 0.28f).coerceIn(0f, 0.94f))
     } else {
-        Color.White.copy(alpha = tintAlpha)
+        Color.White.copy(alpha = tintAlpha.coerceIn(0f, 0.94f))
     }
 
     val hazeStyle = remember(glassTint, blurRadius) {
