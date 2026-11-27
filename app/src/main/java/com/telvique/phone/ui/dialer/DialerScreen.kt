@@ -4,6 +4,7 @@ import android.media.AudioManager
 import android.media.ToneGenerator
 import android.os.Build
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.expandVertically
@@ -63,6 +64,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.onSizeChanged
@@ -199,9 +201,9 @@ fun DialerScreen(
 
     val isBlurEnabled = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && isBackdropGlassCapable()
     val glassPanelTint = if (palette.isDark) {
-        Color(0xFF141418).copy(alpha = 0.62f)
+        Color(0xFF101014).copy(alpha = 0.50f)
     } else {
-        Color.White.copy(alpha = 0.68f)
+        Color.White.copy(alpha = 0.60f)
     }
     val fallbackPanelColor = palette.background.copy(alpha = 0.94f)
 
@@ -213,12 +215,12 @@ fun DialerScreen(
                 backgroundColor(palette.background)
                 colorEffects(listOf(tintEffect))
                 fallbackColorEffect(tintEffect)
-                blurRadius(22.dp)
-                noiseFactor(0.01f)
+                blurRadius(18.dp)
+                noiseFactor(0.005f)
                 mask(
                     Brush.verticalGradient(
                         0.00f to Color.Transparent,
-                        0.13f to Color.Black,
+                        0.32f to Color.Black,
                         1.00f to Color.Black
                     )
                 )
@@ -228,24 +230,52 @@ fun DialerScreen(
         null
     }
 
+    val panelTintBrush = remember(glassPanelTint) {
+        Brush.verticalGradient(
+            0.00f to Color.Transparent,
+            0.18f to glassPanelTint.copy(alpha = glassPanelTint.alpha * 0.35f),
+            0.38f to glassPanelTint,
+            1.00f to glassPanelTint
+        )
+    }
+    val fallbackGradientBrush = remember(fallbackPanelColor) {
+        Brush.verticalGradient(
+            0.00f to Color.Transparent,
+            0.20f to fallbackPanelColor.copy(alpha = 0.45f),
+            0.42f to fallbackPanelColor,
+            1.00f to fallbackPanelColor
+        )
+    }
+
     val statusTopDp = with(density) { WindowInsets.statusBars.getTop(this).toDp() }
     val showTopRow = simAccounts.size > 1 || showTopSettingsButton
+    val topBarReservedHeightDp = if (showTopRow) statusTopDp + 52.dp else statusTopDp + 8.dp
+
+    // When typing, the list's visible area ends above the number display, with a bottom fade
+    val listBottomPaddingDp by animateDpAsState(
+        targetValue = if (input.isNotEmpty()) keypadPanelHeightDp else 0.dp,
+        animationSpec = spring(dampingRatio = 0.85f, stiffness = 600f),
+        label = "listBottomPadding"
+    )
 
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(palette.background)
     ) {
-        // Layer 0: Scrollable Recents / T9 Match list extending underneath the glass keypad
+        // Layer 0: Scrollable Recents / T9 Match list
+        // Extends underneath the keypad when input is empty;
+        // Ends above the number display when input is not empty.
         LazyColumn(
             state = listState,
             modifier = Modifier
                 .fillMaxSize()
+                .padding(bottom = listBottomPaddingDp)
                 .background(palette.background)
                 .hazeSource(state = hazeState),
             contentPadding = PaddingValues(
-                top = if (showTopRow) maxOf(topBarHeightDp, statusTopDp + 52.dp) else statusTopDp + 8.dp,
-                bottom = keypadPanelHeightDp + 16.dp
+                top = topBarReservedHeightDp + 6.dp,
+                bottom = if (input.isNotEmpty()) 20.dp else keypadPanelHeightDp + 20.dp
             )
         ) {
             if (input.isEmpty()) {
@@ -299,22 +329,45 @@ fun DialerScreen(
             }
         }
 
-        // Top overlay: Dual-SIM switcher pill (when > 1 SIM) + Settings button with soft fade
+        // Soft bottom fade above the number display when typing
+        androidx.compose.animation.AnimatedVisibility(
+            visible = input.isNotEmpty(),
+            enter = fadeIn(),
+            exit = fadeOut(),
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = listBottomPaddingDp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(26.dp)
+                    .background(
+                        Brush.verticalGradient(
+                            0.0f to Color.Transparent,
+                            1.0f to palette.background
+                        )
+                    )
+            )
+        }
+
+        // Top overlay: Dual-SIM switcher pill (when > 1 SIM) + Settings button with reserved top bar space & soft fade
         if (showTopRow) {
             Box(
                 modifier = Modifier
                     .align(Alignment.TopCenter)
                     .fillMaxWidth()
-                    .onSizeChanged { topBarHeightPx = it.height }
                     .background(
                         Brush.verticalGradient(
                             0.00f to palette.background,
-                            0.75f to palette.background.copy(alpha = 0.90f),
+                            0.75f to palette.background,
                             1.00f to Color.Transparent
                         )
                     )
                     .windowInsetsPadding(WindowInsets.statusBars)
-                    .padding(horizontal = 20.dp, vertical = 8.dp)
+                    .height(52.dp)
+                    .padding(horizontal = 20.dp),
+                contentAlignment = Alignment.Center
             ) {
                 var showSimMenu by remember { mutableStateOf(false) }
                 val activeSimLabel = remember(simAccounts, preferredSimId) {
@@ -416,14 +469,14 @@ fun DialerScreen(
             }
         }
 
-        // Layer 1: Translucent Glass Keypad Panel anchored at bottom with soft top fade
+        // Layer 1: Keypad Panel anchored at bottom with progressive blur & no hard edge
         Box(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
                 .onSizeChanged { keypadPanelHeightPx = it.height }
         ) {
-            // Backdrop blur layer (Android 12+ RenderEffect via Haze; solid translucent fallback < 12)
+            // ONE single blur layer behind the whole keypad area (Android 12+ RenderEffect via Haze; dark translucent gradient fallback < 12)
             Box(
                 modifier = Modifier
                     .matchParentSize()
@@ -435,30 +488,23 @@ fun DialerScreen(
                                     style = keypadHazeStyle,
                                     performanceMode = HazePerformanceMode.Fixed(0.35f)
                                 )
-                                .background(
-                                    Brush.verticalGradient(
-                                        0.00f to Color.Transparent,
-                                        0.14f to glassPanelTint,
-                                        1.00f to glassPanelTint
-                                    )
-                                )
+                                .background(panelTintBrush)
                         } else {
-                            Modifier.background(
-                                Brush.verticalGradient(
-                                    0.00f to Color.Transparent,
-                                    0.14f to fallbackPanelColor,
-                                    1.00f to fallbackPanelColor
-                                )
-                            )
+                            Modifier.background(fallbackGradientBrush)
                         }
                     )
             )
 
-            // Keypad foreground controls
+            // Keypad foreground controls (keys, digits, and letters sit ABOVE the blur layer)
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(top = 28.dp, start = 20.dp, end = 20.dp, bottom = bottomInsetPadding + 12.dp),
+                    .padding(
+                        top = 16.dp,
+                        start = 20.dp,
+                        end = 20.dp,
+                        bottom = bottomInsetPadding + 10.dp
+                    ),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 // Typed number display shown large between the list and the keypad
@@ -470,7 +516,7 @@ fun DialerScreen(
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(bottom = 10.dp),
+                            .padding(bottom = 8.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         val displayFormatted = remember(input) {
@@ -493,7 +539,7 @@ fun DialerScreen(
                                         if (cleaned.isNotBlank()) onSetNumber(cleaned)
                                     }
                                 )
-                                .padding(horizontal = 8.dp),
+                                .padding(horizontal = 16.dp),
                             textAlign = TextAlign.Center,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
@@ -518,10 +564,10 @@ fun DialerScreen(
                     }
                 }
 
-                // 3x4 Borderless Translucent Keypad (no circles or borders)
+                // 3x4 Frosted Glass Round Keys (circle shape 76.dp, no border)
                 Column(
                     modifier = Modifier.fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     DialPadRows.forEach { row ->
@@ -553,7 +599,7 @@ fun DialerScreen(
                                     }
                                     else -> null
                                 }
-                                GlassDialKey(
+                                AppleLiquidDialKey(
                                     key = key,
                                     onTap = {
                                         playKeyFeedback(key.digit)
@@ -575,7 +621,7 @@ fun DialerScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Box(
-                        modifier = Modifier.size(72.dp),
+                        modifier = Modifier.size(76.dp),
                         contentAlignment = Alignment.Center
                     ) {
                         androidx.compose.animation.AnimatedVisibility(
@@ -585,7 +631,7 @@ fun DialerScreen(
                         ) {
                             Box(
                                 modifier = Modifier
-                                    .size(46.dp)
+                                    .size(56.dp)
                                     .clip(CircleShape)
                                     .clickable {
                                         val pasted = clipboard.getText()?.text?.toString().orEmpty()
@@ -598,16 +644,16 @@ fun DialerScreen(
                                     imageVector = Icons.Rounded.ContentPaste,
                                     contentDescription = "Paste number",
                                     tint = palette.secondaryLabel,
-                                    modifier = Modifier.size(20.dp)
+                                    modifier = Modifier.size(22.dp)
                                 )
                             }
                         }
                     }
 
-                    // Center slot: Iconic Green Call Button
+                    // Center slot: Iconic Green Call Button (76.dp)
                     Box(
                         modifier = Modifier
-                            .size(72.dp)
+                            .size(76.dp)
                             .clip(CircleShape)
                             .background(palette.callGreen, CircleShape)
                             .liquidBubbleHighlight(isDark = false, cornerFraction = 0.5f) { 0.75f }
@@ -637,7 +683,7 @@ fun DialerScreen(
 
                     // Right slot: Backspace (tap deletes one, long-press clears all)
                     Box(
-                        modifier = Modifier.size(72.dp),
+                        modifier = Modifier.size(76.dp),
                         contentAlignment = Alignment.Center
                     ) {
                         androidx.compose.animation.AnimatedVisibility(
@@ -667,7 +713,7 @@ fun DialerScreen(
                                     imageVector = ApplePhoneIcons.DeleteLeftFill,
                                     contentDescription = "Backspace",
                                     tint = palette.secondaryLabel,
-                                    modifier = Modifier.size(26.dp)
+                                    modifier = Modifier.size(28.dp)
                                 )
                             }
                         }
@@ -919,7 +965,7 @@ private fun DialerContactMatchRow(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun GlassDialKey(
+private fun AppleLiquidDialKey(
     key: DialKey,
     onTap: () -> Unit,
     onLongTap: (() -> Unit)? = null
@@ -929,25 +975,38 @@ private fun GlassDialKey(
     val isPressed by interactionSource.collectIsPressedAsState()
 
     val scale by animateFloatAsState(
-        targetValue = if (isPressed) 0.92f else 1f,
-        animationSpec = spring(dampingRatio = 0.65f, stiffness = 700f),
+        targetValue = if (isPressed) 0.94f else 1f,
+        animationSpec = spring(dampingRatio = 0.70f, stiffness = 800f),
         label = "dialKeyScale"
     )
-    val pressAlpha by animateFloatAsState(
-        targetValue = if (isPressed) 0.11f else 0f,
-        animationSpec = spring(dampingRatio = 0.8f, stiffness = 700f),
-        label = "dialKeyHighlight"
+
+    val pressProgress by animateFloatAsState(
+        targetValue = if (isPressed) 1f else 0f,
+        animationSpec = spring(dampingRatio = 0.80f, stiffness = 800f),
+        label = "dialKeyPressProgress"
     )
+
+    // Frosted glass: translucent fill (white ~8-12% alpha), subtle top-to-bottom light gradient, NO border or stroke
+    val restTop = if (palette.isDark) Color.White.copy(alpha = 0.12f) else Color.White.copy(alpha = 0.68f)
+    val restBottom = if (palette.isDark) Color.White.copy(alpha = 0.08f) else Color.White.copy(alpha = 0.52f)
+    val pressedTop = if (palette.isDark) Color.White.copy(alpha = 0.25f) else Color.White.copy(alpha = 0.88f)
+    val pressedBottom = if (palette.isDark) Color.White.copy(alpha = 0.18f) else Color.White.copy(alpha = 0.76f)
+
+    val topFill = lerp(restTop, pressedTop, pressProgress)
+    val bottomFill = lerp(restBottom, pressedBottom, pressProgress)
 
     Column(
         modifier = Modifier
-            .size(width = 84.dp, height = 62.dp)
+            .size(76.dp)
             .graphicsLayer {
                 scaleX = scale
                 scaleY = scale
             }
-            .clip(RoundedCornerShape(18.dp))
-            .background(palette.label.copy(alpha = pressAlpha))
+            .clip(CircleShape)
+            .background(
+                brush = Brush.verticalGradient(listOf(topFill, bottomFill)),
+                shape = CircleShape
+            )
             .combinedClickable(
                 interactionSource = interactionSource,
                 indication = null,
@@ -960,11 +1019,12 @@ private fun GlassDialKey(
         Text(
             text = key.digit,
             style = TextStyle(
-                fontSize = 32.sp,
+                fontSize = if (key.digit == "*" || key.digit == "#") 34.sp else 32.sp,
                 fontWeight = FontWeight.Normal,
                 color = palette.label,
                 fontFeatureSettings = "tnum"
-            )
+            ),
+            lineHeight = if (key.digit == "*" || key.digit == "#") 34.sp else 32.sp
         )
         Box(
             modifier = Modifier.height(14.dp),
@@ -975,18 +1035,32 @@ private fun GlassDialKey(
                     Icon(
                         imageVector = ApplePhoneIcons.Voicemail,
                         contentDescription = "Voicemail",
-                        tint = palette.label.copy(alpha = 0.58f),
-                        modifier = Modifier.size(14.dp)
+                        tint = palette.label.copy(alpha = 0.72f),
+                        modifier = Modifier.size(13.dp)
+                    )
+                }
+                key.digit == "0" -> {
+                    Text(
+                        text = "+",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Normal,
+                        color = palette.label.copy(alpha = 0.75f),
+                        lineHeight = 13.sp
                     )
                 }
                 key.letters.isNotEmpty() -> {
                     Text(
                         text = key.letters,
-                        fontSize = if (key.digit == "0") 13.sp else 10.sp,
+                        fontSize = 9.5.sp,
                         fontWeight = FontWeight.SemiBold,
-                        letterSpacing = if (key.digit == "0") 0.sp else 1.4.sp,
-                        color = palette.label.copy(alpha = 0.65f)
+                        letterSpacing = 1.4.sp,
+                        color = palette.label.copy(alpha = 0.75f),
+                        maxLines = 1,
+                        lineHeight = 10.sp
                     )
+                }
+                else -> {
+                    Spacer(modifier = Modifier.height(14.dp))
                 }
             }
         }
