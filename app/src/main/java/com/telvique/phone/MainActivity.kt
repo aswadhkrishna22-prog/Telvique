@@ -14,7 +14,6 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -323,12 +322,7 @@ private fun TelviqueMainRoot(
 
                     Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                         if (isUnified) {
-                            Crossfade(
-                                targetState = unifiedTab,
-                                animationSpec = tween(durationMillis = 140),
-                                label = "unifiedTabCrossfade"
-                            ) { tab ->
-                            when (tab) {
+                            when (unifiedTab) {
                                 UnifiedTab.CALLS -> RecentsScreen(
                                     callLogs = uiState.filteredCallLogs,
                                     favorites = uiState.favoriteContacts,
@@ -383,14 +377,8 @@ private fun TelviqueMainRoot(
                                     onCallClick = { number, forceSim -> viewModel.callNumber(number, forceSim) }
                                 )
                             }
-                            }
                         } else {
-                            Crossfade(
-                                targetState = classicTab,
-                                animationSpec = tween(durationMillis = 140),
-                                label = "classicTabCrossfade"
-                            ) { tab ->
-                            when (tab) {
+                            when (classicTab) {
                                 ClassicTab.FAVORITES -> FavoritesScreen(
                                     favorites = uiState.favoriteContacts,
                                     blockedNumbers = uiState.settings.blockedNumbers,
@@ -477,7 +465,6 @@ private fun TelviqueMainRoot(
                                     onSetSpeedDial = viewModel::setSpeedDial,
                                     onSetVoicemailNumber = viewModel::setVoicemailNumber
                                 )
-                            }
                             }
                         }
                     }
