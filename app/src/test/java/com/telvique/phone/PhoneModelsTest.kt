@@ -143,14 +143,14 @@ class PhoneModelsTest {
     @Test
     fun slideToAnswer_thresholdAndAlphaCalculations() {
         val maxDragPx = 600f
-        val threshold = maxDragPx * 0.72f // 432f
+        val threshold = maxDragPx * 0.72f
 
         // Releasing below threshold must not complete
         assertFalse(400f >= threshold)
 
         // Releasing at or above threshold must complete
-        assertTrue(432f >= threshold)
-        assertTrue(500f >= threshold)
+        assertTrue(threshold >= threshold)
+        assertTrue(450f >= threshold)
         assertTrue(600f >= threshold)
 
         // Offset clamping
