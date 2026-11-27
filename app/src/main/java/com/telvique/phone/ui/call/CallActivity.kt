@@ -2,7 +2,6 @@ package com.telvique.phone.ui.call
 
 import android.Manifest
 import android.annotation.SuppressLint
-import android.app.KeyguardManager
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
@@ -20,12 +19,20 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -44,6 +51,7 @@ import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -97,6 +105,7 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
@@ -286,9 +295,6 @@ private fun CallScreen(
     var showParticipantsSheet by remember { mutableStateOf(false) }
     var showVerifyCallerSheet by remember { mutableStateOf(false) }
     var elapsedSeconds by remember { mutableLongStateOf(0L) }
-    val isDeviceLocked = remember(primary?.id, primary?.phase) {
-        context.getSystemService(KeyguardManager::class.java)?.isKeyguardLocked == true
-    }
 
     LaunchedEffect(primary?.id, primary?.phase, primary?.connectTimeMillis) {
         if (primary != null && primary.phase == CallPhase.ACTIVE && primary.connectTimeMillis > 0L) {
@@ -657,36 +663,17 @@ private fun CallScreen(
                                 onClick = { onAnswerAndHoldOthers(primary.id) }
                             )
                         }
-                    } else if (isDeviceLocked) {
+                    } else {
                         AppleSlideToAnswerPill(
                             backdrop = posterBackdrop,
+                            callPhase = primary.phase,
+                            callId = primary.id,
                             onAnswer = { onAnswer(primary.id) },
                             onDecline = { onDecline(primary.id) },
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(bottom = 24.dp)
                         )
-                    } else {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(bottom = 26.dp),
-                            horizontalArrangement = Arrangement.SpaceEvenly,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            AppleSolidCallCircle(
-                                icon = ApplePhoneIcons.PhoneDownFill,
-                                label = "Decline",
-                                containerColor = TelviqueColors.CallRed,
-                                onClick = { onDecline(primary.id) }
-                            )
-                            AppleSolidCallCircle(
-                                icon = ApplePhoneIcons.PhoneFill,
-                                label = "Accept",
-                                containerColor = TelviqueColors.CallGreen,
-                                onClick = { onAnswer(primary.id) }
-                            )
-                        }
                     }
                 } else {
                     AnimatedVisibility(
@@ -1798,6 +1785,8 @@ private fun AppleInCallDtmfKeypad(
 @Composable
 private fun AppleSlideToAnswerPill(
     backdrop: Backdrop?,
+    callPhase: CallPhase,
+    callId: String,
     onAnswer: () -> Unit,
     onDecline: () -> Unit,
     modifier: Modifier = Modifier
@@ -1806,86 +1795,208 @@ private fun AppleSlideToAnswerPill(
     val haptics = LocalHapticFeedback.current
     val scope = rememberCoroutineScope()
 
+    var isAnswerTriggered by remember(callId) { mutableStateOf(false) }
+    var isDeclineTriggered by remember(callId) { mutableStateOf(false) }
+    val offsetX = remember(callId) { Animatable(0f) }
+
+    LaunchedEffect(callPhase, callId) {
+        if (callPhase != CallPhase.RINGING) {
+            isAnswerTriggered = false
+            isDeclineTriggered = false
+            offsetX.snapTo(0f)
+        }
+    }
+
     Column(
         modifier = modifier,
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+        verticalArrangement = Arrangement.spacedBy(20.dp)
     ) {
-        TextButton(onClick = onDecline) {
-            Text(
-                text = "Decline",
-                color = TelviqueColors.CallRed,
-                fontSize = 16.sp,
-                fontWeight = FontWeight.SemiBold
-            )
-        }
+        // Separate, clearly accessible red Decline action
+        AppleSolidCallCircle(
+            icon = ApplePhoneIcons.PhoneDownFill,
+            label = "Decline",
+            containerColor = TelviqueColors.CallRed,
+            onClick = {
+                if (!isDeclineTriggered && !isAnswerTriggered && callPhase == CallPhase.RINGING) {
+                    isDeclineTriggered = true
+                    onDecline()
+                }
+            }
+        )
 
+        // Slide to Answer Track
         BoxWithConstraints(
             modifier = Modifier
                 .fillMaxWidth()
+                .widthIn(max = 420.dp)
                 .height(74.dp)
-                .backdropLiquidGlass(
-                    backdrop = backdrop,
-                    shape = CircleShape,
-                    isDark = true,
-                    interactive = false,
-                    hasLens = false,
-                    scrimAlpha = 0.24f,
-                    fallbackTint = Color.White.copy(alpha = 0.16f)
-                )
-                .clip(CircleShape)
-                .padding(5.dp)
         ) {
             val thumbSize = 64.dp
-            val maxDragPx = with(density) { (maxWidth - thumbSize).toPx().coerceAtLeast(1f) }
-            val offsetX = remember { Animatable(0f) }
+            val trackPadding = 5.dp
+            val maxDragPx = with(density) {
+                (maxWidth - (trackPadding * 2) - thumbSize).toPx().coerceAtLeast(1f)
+            }
+            val completionThreshold = maxDragPx * 0.72f
 
-            Text(
-                text = "slide to answer",
-                color = Color.White.copy(alpha = (1f - offsetX.value / maxDragPx).coerceIn(0.15f, 0.85f)),
-                fontSize = 17.sp,
-                fontWeight = FontWeight.Medium,
-                modifier = Modifier.align(Alignment.Center)
+            // Infinite shimmer transition across the track
+            val infiniteTransition = rememberInfiniteTransition(label = "shimmer_transition")
+            val shimmerProgress by infiniteTransition.animateFloat(
+                initialValue = 0f,
+                targetValue = 1f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(durationMillis = 2400, easing = LinearEasing),
+                    repeatMode = RepeatMode.Restart
+                ),
+                label = "shimmer_progress"
             )
+
+            val trackWidthPx = with(density) { maxWidth.toPx() }
+            val shimmerBrush = remember(shimmerProgress, trackWidthPx) {
+                val startX = -trackWidthPx + (shimmerProgress * trackWidthPx * 2f)
+                Brush.linearGradient(
+                    colors = listOf(
+                        Color.White.copy(alpha = 0.35f),
+                        Color.White.copy(alpha = 0.95f),
+                        Color.White.copy(alpha = 0.35f)
+                    ),
+                    start = Offset(startX, 0f),
+                    end = Offset(startX + (trackWidthPx * 0.45f).coerceAtLeast(100f), 0f)
+                )
+            }
+
+            fun triggerAnswer() {
+                if (!isAnswerTriggered && !isDeclineTriggered && callPhase == CallPhase.RINGING) {
+                    isAnswerTriggered = true
+                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                    scope.launch {
+                        offsetX.animateTo(
+                            targetValue = maxDragPx,
+                            animationSpec = spring(
+                                dampingRatio = Spring.DampingRatioLowBouncy,
+                                stiffness = Spring.StiffnessMediumLow
+                            )
+                        )
+                        if (callPhase == CallPhase.RINGING) {
+                            onAnswer()
+                        }
+                    }
+                }
+            }
 
             Box(
                 modifier = Modifier
-                    .offset { IntOffset(offsetX.value.roundToInt(), 0) }
-                    .size(thumbSize)
+                    .fillMaxSize()
+                    .backdropLiquidGlass(
+                        backdrop = backdrop,
+                        shape = CircleShape,
+                        isDark = true,
+                        interactive = false,
+                        hasLens = false,
+                        scrimAlpha = 0.28f,
+                        fallbackTint = Color.White.copy(alpha = 0.16f)
+                    )
+                    .border(1.dp, Color.White.copy(alpha = 0.22f), CircleShape)
                     .clip(CircleShape)
-                    .background(TelviqueColors.CallGreen, CircleShape)
-                    .liquidBubbleHighlight(isDark = false, cornerFraction = 0.5f) { 0.8f }
-                    .pointerInput(maxDragPx) {
-                        detectHorizontalDragGestures(
-                            onDragEnd = {
-                                if (offsetX.value >= maxDragPx * 0.72f) {
-                                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    scope.launch {
-                                        offsetX.animateTo(maxDragPx, spring())
-                                        onAnswer()
-                                    }
-                                } else {
-                                    scope.launch { offsetX.animateTo(0f, spring()) }
-                                }
-                            },
-                            onDragCancel = {
-                                scope.launch { offsetX.animateTo(0f, spring()) }
-                            }
-                        ) { change, dragAmount ->
-                            change.consume()
-                            scope.launch {
-                                offsetX.snapTo((offsetX.value + dragAmount).coerceIn(0f, maxDragPx))
-                            }
+                    .padding(trackPadding)
+                    .semantics(mergeDescendants = true) {
+                        role = Role.Button
+                        contentDescription = "Slide to answer incoming call"
+                        stateDescription = if (isAnswerTriggered) "Answering" else "Ready to slide"
+                        onClick(label = "Answer incoming call") {
+                            triggerAnswer()
+                            true
                         }
-                    },
-                contentAlignment = Alignment.Center
+                    }
             ) {
-                Icon(
-                    imageVector = ApplePhoneIcons.PhoneFill,
-                    contentDescription = "Slide to Answer",
-                    tint = Color.White,
-                    modifier = Modifier.size(28.dp)
+                val textAlpha = (1f - (offsetX.value / maxDragPx) * 1.5f).coerceIn(0f, 1f)
+
+                Text(
+                    text = "slide to answer  ›",
+                    style = TextStyle(
+                        brush = shimmerBrush,
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.Medium,
+                        letterSpacing = 0.3.sp
+                    ),
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .alpha(textAlpha)
                 )
+
+                // Draggable Green Circular Thumb
+                Box(
+                    modifier = Modifier
+                        .offset { IntOffset(offsetX.value.roundToInt(), 0) }
+                        .size(thumbSize)
+                        .shadow(elevation = 6.dp, shape = CircleShape, clip = false)
+                        .clip(CircleShape)
+                        .background(TelviqueColors.CallGreen, CircleShape)
+                        .border(1.dp, Color.White.copy(alpha = 0.35f), CircleShape)
+                        .liquidBubbleHighlight(isDark = false, cornerFraction = 0.5f) { 0.85f }
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                            enabled = !isAnswerTriggered && !isDeclineTriggered && callPhase == CallPhase.RINGING
+                        ) {
+                            // Accessible single-tap fallback for users unable to swipe
+                            triggerAnswer()
+                        }
+                        .pointerInput(maxDragPx, isAnswerTriggered, isDeclineTriggered, callPhase) {
+                            if (isAnswerTriggered || isDeclineTriggered || callPhase != CallPhase.RINGING) return@pointerInput
+                            detectHorizontalDragGestures(
+                                onDragStart = { /* started dragging */ },
+                                onDragEnd = {
+                                    if (isAnswerTriggered || isDeclineTriggered || callPhase != CallPhase.RINGING) return@onDragEnd
+                                    if (offsetX.value >= completionThreshold) {
+                                        triggerAnswer()
+                                    } else {
+                                        scope.launch {
+                                            offsetX.animateTo(
+                                                targetValue = 0f,
+                                                animationSpec = spring(
+                                                    dampingRatio = Spring.DampingRatioLowBouncy,
+                                                    stiffness = Spring.StiffnessMediumLow
+                                                )
+                                            )
+                                        }
+                                    }
+                                },
+                                onDragCancel = {
+                                    if (!isAnswerTriggered) {
+                                        scope.launch {
+                                            offsetX.animateTo(
+                                                targetValue = 0f,
+                                                animationSpec = spring(
+                                                    dampingRatio = Spring.DampingRatioLowBouncy,
+                                                    stiffness = Spring.StiffnessMediumLow
+                                                )
+                                            )
+                                        }
+                                    }
+                                }
+                            ) { change, dragAmount ->
+                                if (!isAnswerTriggered && !isDeclineTriggered && callPhase == CallPhase.RINGING) {
+                                    change.consume()
+                                    val targetOffset = (offsetX.value + dragAmount).coerceIn(0f, maxDragPx)
+                                    scope.launch {
+                                        offsetX.snapTo(targetOffset)
+                                    }
+                                    if (targetOffset >= maxDragPx) {
+                                        triggerAnswer()
+                                    }
+                                }
+                            }
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = ApplePhoneIcons.PhoneFill,
+                        contentDescription = "Slide to Answer",
+                        tint = Color.White,
+                        modifier = Modifier.size(28.dp)
+                    )
+                }
             }
         }
     }
