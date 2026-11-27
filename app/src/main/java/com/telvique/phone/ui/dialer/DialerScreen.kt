@@ -133,21 +133,13 @@ import dev.chrisbanes.haze.blur.hazeBlur
 import dev.chrisbanes.haze.hazeSource
 
 // ── KEYPAD BACKDROP BLUR & LIQUID GLASS TUNING CONSTANTS ───────────────────────
-const val KEYPAD_GLASS_TOP_OFFSET_DP = 140f // Blur ramp starts 140dp above key row 1 (no straight boundary)
-const val KEYPAD_RAMP_DISTANCE_DP = 140f // Full ramp transition distance (140dp)
+const val KEYPAD_GLASS_TOP_OFFSET_DP = 4f // Blur starts 4dp above the top edge of key row 1 (key "1")
+const val KEYPAD_RAMP_DISTANCE_DP = 4f // Feather distance: blur goes 0 -> full across these 4dp, reaching full at key row 1 top edge
 const val KEYPAD_BACKDROP_BLUR_RADIUS_DP = 56f // Max blur radius (~56dp) at full intensity (48-64dp tunable)
 const val KEYPAD_BACKDROP_DARK_TINT = 0.28f // Max dark tint over backdrop (~28% black, 25-30% tunable)
 const val KEYPAD_BACKDROP_NOISE_FACTOR = 0.06f // Low noise (0.05-0.10) for glass-grain feel
 const val KEYPAD_BACKDROP_INPUT_SCALE = 0.5f // Downscale input content to half-resolution for 60fps performance
 const val KEYPAD_FALLBACK_DARK_TINT = 0.80f // Fallback tint opacity for API < 31 (~80% opacity)
-
-// Multi-stop progressive curve: 0 at top, stays below 0.15 for first third of ramp, rising to 1.0 at bottom
-const val KEYPAD_INTENSITY_STOP_0 = 0.00f // at 0.00 (top of ramp: 140dp above row 1, zero blur & zero tint)
-const val KEYPAD_INTENSITY_STOP_1 = 0.03f // at 0.08 (first third of ramp zone: well below 0.15)
-const val KEYPAD_INTENSITY_STOP_2 = 0.12f // at 0.16 (two-thirds of ramp zone)
-const val KEYPAD_INTENSITY_STOP_3 = 0.35f // at 0.26 (key row 1 top edge)
-const val KEYPAD_INTENSITY_STOP_4 = 0.70f // at 0.55 (key row 3/4)
-const val KEYPAD_INTENSITY_STOP_5 = 1.00f // at 1.00 (call button & bottom nav)
 
 // Row alpha fade in ramp zone: 100% (1.0f) at start of ramp down to 55% (0.55f) at key row 1
 const val KEYPAD_ROW_ALPHA_START = 1.00f
@@ -653,24 +645,21 @@ fun DialerScreen(
             // ── HAZE BACKDROP BLUR OVER KEYPAD REGION (WITH PROGRESSIVE FADE & LIQUID GLASS KEY SHADER) ──
             if (glassHeightPx > 0f) {
                 val isAndroid12OrAbove = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
-                val progressiveBrush = remember {
+                // Blur/tint intensity: 0 at the very top of the glass region (4dp above key row 1),
+                // reaching 100% exactly at the top edge of key row 1, then staying full to the bottom.
+                val rampFraction = (with(density) { KEYPAD_RAMP_DISTANCE_DP.dp.toPx() } / glassHeightPx).coerceIn(0.001f, 1f)
+                val progressiveBrush = remember(rampFraction) {
                     Brush.verticalGradient(
-                        0.00f to Color.Black.copy(alpha = KEYPAD_INTENSITY_STOP_0),
-                        0.08f to Color.Black.copy(alpha = KEYPAD_INTENSITY_STOP_1),
-                        0.16f to Color.Black.copy(alpha = KEYPAD_INTENSITY_STOP_2),
-                        0.26f to Color.Black.copy(alpha = KEYPAD_INTENSITY_STOP_3),
-                        0.55f to Color.Black.copy(alpha = KEYPAD_INTENSITY_STOP_4),
-                        1.00f to Color.Black.copy(alpha = KEYPAD_INTENSITY_STOP_5)
+                        0.00f to Color.Black.copy(alpha = 0f),
+                        rampFraction to Color.Black,
+                        1.00f to Color.Black
                     )
                 }
-                val tintScrimBrush = remember {
+                val tintScrimBrush = remember(rampFraction) {
                     Brush.verticalGradient(
-                        0.00f to Color.Black.copy(alpha = KEYPAD_BACKDROP_DARK_TINT * KEYPAD_INTENSITY_STOP_0),
-                        0.08f to Color.Black.copy(alpha = KEYPAD_BACKDROP_DARK_TINT * KEYPAD_INTENSITY_STOP_1),
-                        0.16f to Color.Black.copy(alpha = KEYPAD_BACKDROP_DARK_TINT * KEYPAD_INTENSITY_STOP_2),
-                        0.26f to Color.Black.copy(alpha = KEYPAD_BACKDROP_DARK_TINT * KEYPAD_INTENSITY_STOP_3),
-                        0.55f to Color.Black.copy(alpha = KEYPAD_BACKDROP_DARK_TINT * KEYPAD_INTENSITY_STOP_4),
-                        1.00f to Color.Black.copy(alpha = KEYPAD_BACKDROP_DARK_TINT * KEYPAD_INTENSITY_STOP_5)
+                        0.00f to Color.Black.copy(alpha = 0f),
+                        rampFraction to Color.Black.copy(alpha = KEYPAD_BACKDROP_DARK_TINT),
+                        1.00f to Color.Black.copy(alpha = KEYPAD_BACKDROP_DARK_TINT)
                     )
                 }
                 val keypadHazeStyle = remember(progressiveBrush) {
@@ -730,12 +719,9 @@ fun DialerScreen(
                             } else {
                                 Modifier.background(
                                     Brush.verticalGradient(
-                                        0.00f to Color.Black.copy(alpha = KEYPAD_FALLBACK_DARK_TINT * KEYPAD_INTENSITY_STOP_0),
-                                        0.08f to Color.Black.copy(alpha = KEYPAD_FALLBACK_DARK_TINT * KEYPAD_INTENSITY_STOP_1),
-                                        0.16f to Color.Black.copy(alpha = KEYPAD_FALLBACK_DARK_TINT * KEYPAD_INTENSITY_STOP_2),
-                                        0.26f to Color.Black.copy(alpha = KEYPAD_FALLBACK_DARK_TINT * KEYPAD_INTENSITY_STOP_3),
-                                        0.55f to Color.Black.copy(alpha = KEYPAD_FALLBACK_DARK_TINT * KEYPAD_INTENSITY_STOP_4),
-                                        1.00f to Color.Black.copy(alpha = KEYPAD_FALLBACK_DARK_TINT * KEYPAD_INTENSITY_STOP_5)
+                                        0.00f to Color.Black.copy(alpha = 0f),
+                                        rampFraction to Color.Black.copy(alpha = KEYPAD_FALLBACK_DARK_TINT),
+                                        1.00f to Color.Black.copy(alpha = KEYPAD_FALLBACK_DARK_TINT)
                                     )
                                 )
                             }
