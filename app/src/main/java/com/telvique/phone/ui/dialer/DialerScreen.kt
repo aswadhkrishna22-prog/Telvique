@@ -124,6 +124,7 @@ import com.telvique.phone.ui.icons.ApplePhoneIcons
 import com.telvique.phone.ui.theme.LocalApplePalette
 import dev.chrisbanes.haze.HazeInput
 import dev.chrisbanes.haze.HazePerformanceMode
+import dev.chrisbanes.haze.HazeProgressive
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.blur.HazeBlurStyle
 import dev.chrisbanes.haze.blur.HazeColorEffect
@@ -131,10 +132,14 @@ import dev.chrisbanes.haze.blur.hazeBlur
 import dev.chrisbanes.haze.hazeSource
 
 // ── KEYPAD BACKDROP BLUR & LIQUID GLASS TUNING CONSTANTS ───────────────────────
-const val KEYPAD_BACKDROP_BLUR_RADIUS_DP = 32f // Strong blur radius for backdrop (~32dp)
-const val KEYPAD_KEY_REFRACTION_BLUR_DP = 6f // Light blur radius for key refraction layer (~6dp)
-const val KEYPAD_BACKDROP_DARK_TINT = 0.38f // Dark tint over backdrop (~38% black, adjustable)
+const val KEYPAD_BACKDROP_BLUR_RADIUS_DP = 56f // Strong blur radius (~56dp, range 48-64dp) so list text/avatars are unrecognizable blobs
+const val KEYPAD_PROGRESSIVE_START_INTENSITY = 0.30f // Progressive intensity near top edge (4px above key row 1)
+const val KEYPAD_PROGRESSIVE_END_INTENSITY = 1.00f // Progressive intensity at bottom (near call button & bottom nav)
+const val KEYPAD_BACKDROP_DARK_TINT = 0.28f // Dark tint over backdrop (~28% black, range 25-30%)
+const val KEYPAD_BACKDROP_NOISE_FACTOR = 0.08f // Subtle Haze noise for glass-grain texture (~0.08, range 0.05-0.10)
+const val KEYPAD_BACKDROP_INPUT_SCALE = 0.5f // Downscale input content to half-resolution for 60fps performance
 const val KEYPAD_FALLBACK_DARK_TINT = 0.80f // Fallback tint opacity for API < 31 (~80% opacity)
+const val KEYPAD_KEY_REFRACTION_BLUR_DP = 6f // Light blur radius for key refraction layer (~6dp)
 const val KEYPAD_DISPERSION_STRENGTH = 0.022f // Subtle rainbow dispersion at rim only (~50% reduced)
 const val KEYPAD_REFRACTION_STRENGTH = 0.28f // Refraction bending & magnification strength
 const val KEYPAD_SPECULAR_STRENGTH = 0.35f // Soft top-left specular highlight intensity
@@ -635,11 +640,17 @@ fun DialerScreen(
                     val darkTintEffect = HazeColorEffect.tint(Color.Black.copy(alpha = KEYPAD_BACKDROP_DARK_TINT))
                     HazeBlurStyle {
                         blurEnabled(true)
-                        backgroundColor(Color.Black.copy(alpha = KEYPAD_BACKDROP_DARK_TINT * 0.45f))
+                        backgroundColor(Color.Black.copy(alpha = KEYPAD_BACKDROP_DARK_TINT * 0.40f))
                         colorEffects(listOf(darkTintEffect))
                         fallbackColorEffect(darkTintEffect)
                         blurRadius(KEYPAD_BACKDROP_BLUR_RADIUS_DP.dp)
-                        noiseFactor(0.01f)
+                        noiseFactor(KEYPAD_BACKDROP_NOISE_FACTOR)
+                        progressive(
+                            HazeProgressive.verticalGradient(
+                                startIntensity = KEYPAD_PROGRESSIVE_START_INTENSITY,
+                                endIntensity = KEYPAD_PROGRESSIVE_END_INTENSITY
+                            )
+                        )
                         mask(
                             Brush.verticalGradient(
                                 0.00f to Color.Transparent,
@@ -691,14 +702,15 @@ fun DialerScreen(
                                 Modifier.hazeBlur(
                                     input = HazeInput.Sources(hazeState),
                                     style = keypadHazeStyle,
-                                    performanceMode = HazePerformanceMode.Fixed(0.5f)
+                                    performanceMode = HazePerformanceMode.Fixed(KEYPAD_BACKDROP_INPUT_SCALE)
                                 )
                             } else {
                                 Modifier.background(
                                     Brush.verticalGradient(
                                         0.00f to Color.Transparent,
-                                        0.015f to Color.Black.copy(alpha = KEYPAD_FALLBACK_DARK_TINT),
-                                        1.00f to Color.Black.copy(alpha = KEYPAD_FALLBACK_DARK_TINT)
+                                        0.015f to Color.Black.copy(alpha = KEYPAD_FALLBACK_DARK_TINT * KEYPAD_PROGRESSIVE_START_INTENSITY),
+                                        0.50f to Color.Black.copy(alpha = KEYPAD_FALLBACK_DARK_TINT * 0.65f),
+                                        1.00f to Color.Black.copy(alpha = KEYPAD_FALLBACK_DARK_TINT * KEYPAD_PROGRESSIVE_END_INTENSITY)
                                     )
                                 )
                             }
