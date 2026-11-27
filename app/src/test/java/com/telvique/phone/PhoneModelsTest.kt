@@ -71,4 +71,63 @@ class PhoneModelsTest {
         assertEquals("*#06#", PhoneFormatUtils.normalizeDialInput("USSD: *#06#"))
         assertEquals("+919876543210", PhoneFormatUtils.normalizeDialInput("+91 98765-43210"))
     }
+
+    @Test
+    fun callLogItem_displayTitle_namePriority() {
+        // 1. Saved contact name takes priority over operator CNAP name
+        val withContactAndCnap = CallLogItem(
+            id = 1L,
+            number = "+919876543210",
+            cachedName = "Amma",
+            type = CallLogType.INCOMING,
+            timestamp = 1000L,
+            durationSeconds = 10L,
+            simLabel = null,
+            photoUri = null,
+            cnapName = "AIRTEL USER"
+        )
+        assertEquals("Amma", withContactAndCnap.displayTitle)
+
+        // 2. Unknown number uses CNAP operator name when available
+        val unknownWithCnap = CallLogItem(
+            id = 2L,
+            number = "+919876543210",
+            cachedName = null,
+            type = CallLogType.INCOMING,
+            timestamp = 1000L,
+            durationSeconds = 10L,
+            simLabel = null,
+            photoUri = null,
+            cnapName = "RAMESH KUMAR"
+        )
+        assertEquals("RAMESH KUMAR", unknownWithCnap.displayTitle)
+
+        // 3. Fallback to phone number when neither contact nor CNAP name exists
+        val unknownWithoutCnap = CallLogItem(
+            id = 3L,
+            number = "+919876543210",
+            cachedName = null,
+            type = CallLogType.INCOMING,
+            timestamp = 1000L,
+            durationSeconds = 0L,
+            simLabel = null,
+            photoUri = null,
+            cnapName = null
+        )
+        assertEquals("+919876543210", unknownWithoutCnap.displayTitle)
+
+        // 4. Fallback to Private Number if number is blank
+        val privateNumber = CallLogItem(
+            id = 4L,
+            number = "",
+            cachedName = null,
+            type = CallLogType.MISSED,
+            timestamp = 1000L,
+            durationSeconds = 0L,
+            simLabel = null,
+            photoUri = null,
+            cnapName = null
+        )
+        assertEquals("Private Number", privateNumber.displayTitle)
+    }
 }

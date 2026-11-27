@@ -52,12 +52,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.telvique.phone.R
 import com.telvique.phone.data.CallLogItem
 import com.telvique.phone.data.CallLogType
 import com.telvique.phone.data.ContactItem
@@ -372,10 +374,11 @@ fun RecentsScreen(
     val activeGroup = infoTarget
     val activeItem = activeGroup?.primary
     if (activeItem != null) {
-        val cnapName = if (activeItem.cachedName.isNullOrBlank()) {
-            CallManager.lookupCachedCnapName(activeItem.number)
+        val hasSavedContact = !activeItem.cachedName.isNullOrBlank()
+        val cnapName = if (!hasSavedContact) {
+            activeItem.cnapName ?: CallManager.lookupCachedCnapName(activeItem.number, context)
         } else null
-        val effectiveTitle = cnapName ?: activeItem.displayTitle
+        val effectiveTitle = if (!hasSavedContact && cnapName != null) cnapName else activeItem.displayTitle
         val isBlocked = blockedNumbers.any {
             it == activeItem.number || PhoneFormatUtils.numbersMatch(it, activeItem.number)
         }
@@ -402,14 +405,16 @@ fun RecentsScreen(
                     fontWeight = FontWeight.SemiBold
                 )
                 if (cnapName != null) {
+                    Spacer(modifier = Modifier.height(2.dp))
                     Text(
-                        text = "Carrier ID (CNAP)",
-                        color = palette.accentBlue,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold
+                        text = stringResource(R.string.cnap_operator_records_label),
+                        color = palette.secondaryLabel,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Normal
                     )
                 }
                 if (activeItem.number.isNotBlank() && activeItem.number != effectiveTitle) {
+                    Spacer(modifier = Modifier.height(2.dp))
                     Text(
                         text = PhoneFormatUtils.formatDisplayNumber(activeItem.number),
                         color = palette.secondaryLabel,
@@ -685,17 +690,19 @@ private fun AppleRecentCallRow(
     onInfoClick: () -> Unit
 ) {
     val palette = LocalApplePalette.current
+    val context = LocalContext.current
     val isMissed = item.type == CallLogType.MISSED || item.type == CallLogType.REJECTED
-    val cnapName = if (item.cachedName.isNullOrBlank()) {
-        CallManager.lookupCachedCnapName(item.number)
+    val hasSavedContact = !item.cachedName.isNullOrBlank()
+    val cnapName = if (!hasSavedContact) {
+        item.cnapName ?: CallManager.lookupCachedCnapName(item.number, context)
     } else null
-    val isSpam = item.cachedName.isNullOrBlank() && PhoneFormatUtils.isSuspectedTelemarketer(item.number)
-    val fallbackTitle = if (item.cachedName.isNullOrBlank() && item.number.isNotBlank()) {
+    val isSpam = !hasSavedContact && PhoneFormatUtils.isSuspectedTelemarketer(item.number)
+    val fallbackTitle = if (!hasSavedContact && item.number.isNotBlank()) {
         PhoneFormatUtils.formatDisplayNumber(item.number)
     } else {
         item.displayTitle
     }
-    val baseTitle = cnapName ?: fallbackTitle
+    val baseTitle = if (!hasSavedContact && cnapName != null) cnapName else fallbackTitle
     val titleWithCount = if (count > 1) "$baseTitle ($count)" else baseTitle
 
     Column(
@@ -755,7 +762,7 @@ private fun AppleRecentCallRow(
                 val meta = buildList {
                     when {
                         isSpam -> add("Telemarketer")
-                        cnapName != null -> add("Carrier ID")
+                        cnapName != null -> add(stringResource(R.string.cnap_operator_records_label))
                         item.type == CallLogType.MISSED -> add("Missed")
                         item.type == CallLogType.REJECTED -> add("Declined")
                         item.type == CallLogType.BLOCKED -> add("Blocked")

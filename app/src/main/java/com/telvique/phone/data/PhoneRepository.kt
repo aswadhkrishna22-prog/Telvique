@@ -147,6 +147,7 @@ class PhoneRepository(private val context: Context) {
         )
 
         val simAccounts = getSimAccounts().associate { it.id to it.label }
+        val cnapRepo = CnapRepository.getInstance(context)
 
         resolver.query(
             CallLog.Calls.CONTENT_URI,
@@ -184,6 +185,11 @@ class PhoneRepository(private val context: Context) {
                     else -> CallLogType.UNKNOWN
                 }
 
+                val cnapName = if (name.isNullOrBlank() && number.isNotBlank()) {
+                    cnapRepo.getCnapForCallLog(id)
+                        ?: cnapRepo.matchAndSavePending(id, number, date)
+                } else null
+
                 result.add(
                     CallLogItem(
                         id = id,
@@ -193,7 +199,8 @@ class PhoneRepository(private val context: Context) {
                         timestamp = date,
                         durationSeconds = duration,
                         simLabel = accountId?.let { simAccounts[it] },
-                        photoUri = photoUri
+                        photoUri = photoUri,
+                        cnapName = cnapName
                     )
                 )
             }
@@ -209,6 +216,9 @@ class PhoneRepository(private val context: Context) {
                 "${CallLog.Calls._ID} = ?",
                 arrayOf(id.toString())
             )
+            if (deleted > 0) {
+                CnapRepository.getInstance(context).deleteCnapForCallLog(id)
+            }
             deleted > 0
         }.getOrDefault(false)
     }
@@ -216,7 +226,11 @@ class PhoneRepository(private val context: Context) {
     suspend fun clearAllCallLogs(): Boolean = withContext(Dispatchers.IO) {
         if (!hasPermission(Manifest.permission.WRITE_CALL_LOG)) return@withContext false
         runCatching {
-            resolver.delete(CallLog.Calls.CONTENT_URI, null, null) >= 0
+            val deleted = resolver.delete(CallLog.Calls.CONTENT_URI, null, null) >= 0
+            if (deleted) {
+                CnapRepository.getInstance(context).clearAll()
+            }
+            deleted
         }.getOrDefault(false)
     }
 
