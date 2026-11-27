@@ -73,7 +73,7 @@ object CallNotificationHelper {
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
 
-            NotificationCompat.Builder(context, CHANNEL_INCOMING)
+            val builder = NotificationCompat.Builder(context, CHANNEL_INCOMING)
                 .setSmallIcon(R.drawable.ic_launcher_foreground)
                 .setContentTitle(call.displayName)
                 .setContentText(
@@ -94,7 +94,11 @@ object CallNotificationHelper {
                         answerPending
                     )
                 )
-                .build()
+
+            if (!call.networkName.isNullOrBlank()) {
+                builder.setSubText(context.getString(R.string.cnap_operator_records_label))
+            }
+            builder.build()
         } else {
             val hangupIntent = Intent(context, CallActionReceiver::class.java).apply {
                 action = CallActionReceiver.ACTION_HANGUP
@@ -115,7 +119,7 @@ object CallNotificationHelper {
                 else -> "Call"
             }
 
-            NotificationCompat.Builder(context, CHANNEL_ONGOING)
+            val builder = NotificationCompat.Builder(context, CHANNEL_ONGOING)
                 .setSmallIcon(R.drawable.ic_launcher_foreground)
                 .setContentTitle(call.displayName)
                 .setContentText(subtitle)
@@ -135,7 +139,11 @@ object CallNotificationHelper {
                         hangupPending
                     )
                 )
-                .build()
+
+            if (!call.networkName.isNullOrBlank()) {
+                builder.setSubText(context.getString(R.string.cnap_operator_records_label))
+            }
+            builder.build()
         }
 
         runCatching {
@@ -143,7 +151,7 @@ object CallNotificationHelper {
         }
     }
 
-    fun showMissedCall(context: Context, displayName: String, number: String) {
+    fun showMissedCall(context: Context, displayName: String, number: String, isOperatorName: Boolean = false) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
             PackageManager.PERMISSION_GRANTED
@@ -176,6 +184,10 @@ object CallNotificationHelper {
             .setCategory(NotificationCompat.CATEGORY_MISSED_CALL)
             .setAutoCancel(true)
             .setContentIntent(openPending)
+
+        if (isOperatorName) {
+            builder.setSubText(context.getString(R.string.cnap_operator_records_label))
+        }
 
         if (number.isNotBlank()) {
             val callBackIntent = Intent(context, CallActionReceiver::class.java).apply {

@@ -1,8 +1,10 @@
 package com.telvique.phone.ui.call
 
+import android.Manifest
 import android.annotation.SuppressLint
 import android.app.KeyguardManager
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.provider.ContactsContract
@@ -10,9 +12,12 @@ import android.telecom.CallAudioState
 import android.telecom.TelecomManager
 import android.view.KeyEvent
 import android.view.WindowManager
+import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.spring
@@ -27,6 +32,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -35,6 +41,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -45,17 +53,20 @@ import androidx.compose.material.icons.rounded.CallMerge
 import androidx.compose.material.icons.rounded.CallSplit
 import androidx.compose.material.icons.rounded.Group
 import androidx.compose.material.icons.rounded.Headset
+import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.PhoneInTalk
 import androidx.compose.material.icons.rounded.SwapCalls
 import androidx.compose.material.icons.rounded.VerifiedUser
 import androidx.compose.material.icons.rounded.VolumeOff
 import androidx.compose.material.icons.rounded.WarningAmber
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -78,6 +89,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -85,18 +97,24 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
 import coil3.compose.AsyncImage
 import com.kyant.backdrop.Backdrop
 import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import com.telvique.phone.MainActivity
+import com.telvique.phone.R
 import com.telvique.phone.TelviqueApp
+import com.telvique.phone.data.ContactItem
 import com.telvique.phone.data.PhoneFormatUtils
+import com.telvique.phone.data.PhoneRepository
 import com.telvique.phone.data.TelviqueSettings
 import com.telvique.phone.telecom.CallAudioUiState
 import com.telvique.phone.telecom.CallManager
@@ -105,6 +123,7 @@ import com.telvique.phone.telecom.CallUiItem
 import com.telvique.phone.telecom.TelecomUiState
 import com.telvique.phone.ui.components.ContactAvatar
 import com.telvique.phone.ui.components.posterColorsForName
+import com.telvique.phone.ui.contacts.AppleSearchField
 import com.telvique.phone.ui.glass.backdropLiquidGlass
 import com.telvique.phone.ui.glass.isBackdropGlassCapable
 import com.telvique.phone.ui.glass.liquidBubbleHighlight
@@ -137,13 +156,21 @@ class CallActivity : ComponentActivity() {
             TelviqueTheme(darkTheme = true, forceDarkSystemBars = true) {
                 val telecomState by CallManager.uiState.collectAsStateWithLifecycle()
                 val settings by settingsFlow.collectAsStateWithLifecycle(initialValue = TelviqueSettings())
+                var isDialingVerificationCall by remember { mutableStateOf(false) }
 
-                LaunchedEffect(telecomState.calls) {
-                    if (telecomState.calls.isEmpty()) {
+                LaunchedEffect(telecomState.calls, isDialingVerificationCall) {
+                    if (telecomState.calls.isEmpty() && !isDialingVerificationCall) {
                         delay(350)
-                        if (CallManager.uiState.value.calls.isEmpty()) {
+                        if (CallManager.uiState.value.calls.isEmpty() && !isDialingVerificationCall) {
                             finish()
                         }
+                    }
+                }
+
+                LaunchedEffect(isDialingVerificationCall) {
+                    if (isDialingVerificationCall) {
+                        delay(3500L)
+                        isDialingVerificationCall = false
                     }
                 }
 
@@ -184,7 +211,11 @@ class CallActivity : ComponentActivity() {
                         runCatching { startActivity(intent) }
                     },
                     onPlayDtmf = { digit, id -> CallManager.playDtmf(digit, id) },
-                    onStopDtmf = { id -> CallManager.stopDtmf(id) }
+                    onStopDtmf = { id -> CallManager.stopDtmf(id) },
+                    onVerifyCaller = { callId, newNumber ->
+                        isDialingVerificationCall = true
+                        CallManager.disconnectAndCall(this, callId, newNumber)
+                    }
                 )
             }
         }
@@ -233,7 +264,8 @@ private fun CallScreen(
     onAddCall: () -> Unit,
     onOpenContacts: () -> Unit,
     onPlayDtmf: (Char, String) -> Unit,
-    onStopDtmf: (String) -> Unit
+    onStopDtmf: (String) -> Unit,
+    onVerifyCaller: (String, String) -> Unit = { _, _ -> }
 ) {
     val context = LocalContext.current
     val primary = telecomState.primaryCall
@@ -243,6 +275,7 @@ private fun CallScreen(
     var showSmsSheet by remember { mutableStateOf(false) }
     var showAudioRouteSheet by remember { mutableStateOf(false) }
     var showParticipantsSheet by remember { mutableStateOf(false) }
+    var showVerifyCallerSheet by remember { mutableStateOf(false) }
     var elapsedSeconds by remember { mutableLongStateOf(0L) }
     val isDeviceLocked = remember(primary?.id, primary?.phase) {
         context.getSystemService(KeyguardManager::class.java)?.isKeyguardLocked == true
@@ -406,6 +439,17 @@ private fun CallScreen(
                     overflow = TextOverflow.Ellipsis
                 )
 
+                if (!primary.networkName.isNullOrBlank()) {
+                    Spacer(modifier = Modifier.height(3.dp))
+                    Text(
+                        text = stringResource(R.string.cnap_operator_records_label),
+                        color = Color.White.copy(alpha = 0.60f),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Normal,
+                        textAlign = TextAlign.Center
+                    )
+                }
+
                 if (primary.number.isNotBlank() && primary.number != primary.displayName) {
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
@@ -451,64 +495,32 @@ private fun CallScreen(
                     }
                 }
 
-                // TRAI CNAP / Carrier ID & Scam Shield Badges
-                if (primary.isPotentialSpam || primary.networkName != null || primary.isNetworkVerified) {
+                if (primary.isPotentialSpam) {
                     Spacer(modifier = Modifier.height(10.dp))
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        if (primary.isPotentialSpam) {
-                            Row(
-                                modifier = Modifier
-                                    .clip(CircleShape)
-                                    .background(TelviqueColors.CallRed.copy(alpha = 0.85f), CircleShape)
-                                    .padding(horizontal = 12.dp, vertical = 5.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Rounded.WarningAmber,
-                                    contentDescription = null,
-                                    tint = Color.White,
-                                    modifier = Modifier.size(14.dp)
-                                )
-                                Spacer(modifier = Modifier.width(5.dp))
-                                Text(
-                                    text = "Suspected Telemarketer / Spam",
-                                    color = Color.White,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                            }
-                        } else if (primary.networkName != null || primary.isNetworkVerified) {
-                            Row(
-                                modifier = Modifier
-                                    .backdropLiquidGlass(
-                                        backdrop = posterBackdrop,
-                                        shape = CircleShape,
-                                        isDark = true,
-                                        interactive = false,
-                                        hasLens = false,
-                                        scrimAlpha = 0.28f,
-                                        fallbackTint = Color.White.copy(alpha = 0.16f)
-                                    )
-                                    .padding(horizontal = 12.dp, vertical = 5.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Rounded.VerifiedUser,
-                                    contentDescription = null,
-                                    tint = TelviqueColors.CallGreen,
-                                    modifier = Modifier.size(14.dp)
-                                )
-                                Spacer(modifier = Modifier.width(5.dp))
-                                Text(
-                                    text = if (primary.networkName != null) "Carrier KYC • CNAP" else "Verified Caller",
-                                    color = Color.White,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                            }
+                        Row(
+                            modifier = Modifier
+                                .clip(CircleShape)
+                                .background(TelviqueColors.CallRed.copy(alpha = 0.85f), CircleShape)
+                                .padding(horizontal = 12.dp, vertical = 5.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.WarningAmber,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Spacer(modifier = Modifier.width(5.dp))
+                            Text(
+                                text = "Suspected Telemarketer / Spam",
+                                color = Color.White,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
                         }
                     }
                 }
@@ -703,6 +715,16 @@ private fun CallScreen(
                     }
 
                     if (!showKeypad) {
+                        if (!primary.isSavedContact && !primary.isConference &&
+                            (primary.phase == CallPhase.ACTIVE || primary.phase == CallPhase.HOLDING)
+                        ) {
+                            VerifyCallerPill(
+                                backdrop = posterBackdrop,
+                                onClick = { showVerifyCallerSheet = true }
+                            )
+                            Spacer(modifier = Modifier.height(16.dp))
+                        }
+
                         AppleInCallControlsGrid(
                             primary = primary,
                             hasSecondaryCall = secondary != null,
@@ -915,6 +937,386 @@ private fun CallScreen(
                 }
                 Spacer(modifier = Modifier.height(18.dp))
             }
+        }
+    }
+
+    if (showVerifyCallerSheet && primary != null) {
+        VerifyCallerSheet(
+            onDismissRequest = { showVerifyCallerSheet = false },
+            onSelectNumber = { chosenNumber ->
+                showVerifyCallerSheet = false
+                onVerifyCaller(primary.id, chosenNumber)
+            }
+        )
+    }
+}
+
+@Composable
+private fun VerifyCallerPill(
+    backdrop: Backdrop?,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .backdropLiquidGlass(
+                backdrop = backdrop,
+                shape = CircleShape,
+                isDark = true,
+                interactive = true,
+                pressedScale = 1.04f,
+                hasLens = false,
+                scrimAlpha = 0.22f,
+                fallbackTint = Color.White.copy(alpha = 0.14f)
+            )
+            .clip(CircleShape)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            imageVector = Icons.Rounded.VerifiedUser,
+            contentDescription = null,
+            tint = Color.White.copy(alpha = 0.9f),
+            modifier = Modifier.size(15.dp)
+        )
+        Spacer(modifier = Modifier.width(7.dp))
+        Text(
+            text = stringResource(R.string.verify_caller_action),
+            color = Color.White.copy(alpha = 0.92f),
+            fontSize = 13.sp,
+            fontWeight = FontWeight.SemiBold
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun VerifyCallerSheet(
+    onDismissRequest: () -> Unit,
+    onSelectNumber: (String) -> Unit
+) {
+    val context = LocalContext.current
+    var hasContactsPermission by remember {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.READ_CONTACTS
+            ) == PackageManager.PERMISSION_GRANTED
+        )
+    }
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        hasContactsPermission = granted
+    }
+
+    var contacts by remember { mutableStateOf<List<ContactItem>>(emptyList()) }
+    var searchQuery by remember { mutableStateOf("") }
+    var contactForNumberSelection by remember { mutableStateOf<ContactItem?>(null) }
+    var isLoading by remember { mutableStateOf(false) }
+    val noNumberMessage = stringResource(R.string.verify_caller_no_number)
+
+    LaunchedEffect(hasContactsPermission) {
+        if (hasContactsPermission) {
+            isLoading = true
+            withContext(Dispatchers.IO) {
+                val loaded = PhoneRepository(context.applicationContext).loadContacts()
+                withContext(Dispatchers.Main) {
+                    contacts = loaded
+                    isLoading = false
+                }
+            }
+        }
+    }
+
+    val filteredContacts = remember(contacts, searchQuery) {
+        if (searchQuery.isBlank()) {
+            contacts
+        } else {
+            val q = searchQuery.trim().lowercase()
+            contacts.filter { contact ->
+                contact.name.lowercase().contains(q) ||
+                    contact.numbers.any { it.number.contains(q) }
+            }
+        }
+    }
+
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+    ModalBottomSheet(
+        onDismissRequest = onDismissRequest,
+        sheetState = sheetState,
+        containerColor = Color(0xFF1C1C1E),
+        tonalElevation = 0.dp
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .fillMaxHeight(0.85f)
+                .padding(horizontal = 20.dp)
+        ) {
+            // Header: Title + Cancel Button
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = stringResource(R.string.verify_caller_sheet_title),
+                    color = Color.White,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f)
+                )
+                TextButton(onClick = onDismissRequest) {
+                    Text(
+                        text = stringResource(R.string.verify_caller_cancel),
+                        color = TelviqueColors.AppleBlueDark,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(4.dp))
+
+            // Body: one short line
+            Text(
+                text = stringResource(R.string.verify_caller_sheet_body),
+                color = Color.White.copy(alpha = 0.72f),
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Normal
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            if (!hasContactsPermission) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 40.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(56.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFF2C2C2E), CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Person,
+                            contentDescription = null,
+                            tint = Color.White.copy(alpha = 0.8f),
+                            modifier = Modifier.size(28.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(14.dp))
+                    Text(
+                        text = stringResource(R.string.verify_caller_permission_title),
+                        color = Color.White,
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = stringResource(R.string.verify_caller_permission_message),
+                        color = Color.White.copy(alpha = 0.65f),
+                        fontSize = 14.sp,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(horizontal = 24.dp)
+                    )
+                    Spacer(modifier = Modifier.height(20.dp))
+                    Surface(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(12.dp))
+                            .clickable {
+                                permissionLauncher.launch(Manifest.permission.READ_CONTACTS)
+                            },
+                        color = TelviqueColors.AppleBlueDark
+                    ) {
+                        Text(
+                            text = stringResource(R.string.verify_caller_grant_permission),
+                            color = Color.White,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(horizontal = 24.dp, vertical = 10.dp)
+                        )
+                    }
+                }
+            } else {
+                // Search bar
+                AppleSearchField(
+                    query = searchQuery,
+                    placeholder = stringResource(R.string.verify_caller_search_placeholder),
+                    onQueryChange = { searchQuery = it },
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                if (isLoading) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = stringResource(R.string.verify_caller_loading),
+                            color = Color.White.copy(alpha = 0.5f),
+                            fontSize = 14.sp
+                        )
+                    }
+                } else if (filteredContacts.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = stringResource(R.string.verify_caller_empty_search),
+                            color = Color.White.copy(alpha = 0.5f),
+                            fontSize = 14.sp
+                        )
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f)
+                    ) {
+                        items(filteredContacts, key = { it.id }) { contact ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .clickable {
+                                        when {
+                                            contact.numbers.isEmpty() -> {
+                                                Toast
+                                                    .makeText(
+                                                        context,
+                                                        noNumberMessage,
+                                                        Toast.LENGTH_SHORT
+                                                    )
+                                                    .show()
+                                            }
+                                            contact.numbers.size == 1 -> {
+                                                onSelectNumber(contact.numbers[0].number)
+                                            }
+                                            else -> {
+                                                contactForNumberSelection = contact
+                                            }
+                                        }
+                                    }
+                                    .padding(horizontal = 6.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                ContactAvatar(
+                                    name = contact.name,
+                                    photoUri = contact.photoUri,
+                                    size = 44.dp
+                                )
+                                Spacer(modifier = Modifier.width(14.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = contact.name,
+                                        color = Color.White,
+                                        fontSize = 16.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    if (contact.primaryNumber.isNotBlank()) {
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        Text(
+                                            text = PhoneFormatUtils.formatDisplayNumber(contact.primaryNumber),
+                                            color = Color.White.copy(alpha = 0.65f),
+                                            fontSize = 13.sp
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+        }
+
+        if (contactForNumberSelection != null) {
+            val contact = contactForNumberSelection!!
+            AlertDialog(
+                onDismissRequest = { contactForNumberSelection = null },
+                containerColor = Color(0xFF2C2C2E),
+                title = {
+                    Text(
+                        text = stringResource(R.string.verify_caller_choose_number_title),
+                        color = Color.White,
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        contact.numbers.forEach { entry ->
+                            Surface(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .clickable {
+                                        val num = entry.number
+                                        contactForNumberSelection = null
+                                        onSelectNumber(num)
+                                    },
+                                color = Color(0xFF3A3A3C)
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column {
+                                        if (entry.typeLabel.isNotBlank()) {
+                                            Text(
+                                                text = entry.typeLabel,
+                                                color = TelviqueColors.AppleBlueDark,
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.SemiBold
+                                            )
+                                        }
+                                        Text(
+                                            text = PhoneFormatUtils.formatDisplayNumber(entry.number),
+                                            color = Color.White,
+                                            fontSize = 15.sp
+                                        )
+                                    }
+                                    Icon(
+                                        imageVector = ApplePhoneIcons.PhoneFill,
+                                        contentDescription = null,
+                                        tint = TelviqueColors.CallGreen,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                },
+                confirmButton = {},
+                dismissButton = {
+                    TextButton(onClick = { contactForNumberSelection = null }) {
+                        Text(
+                            text = stringResource(R.string.verify_caller_cancel),
+                            color = Color.White.copy(alpha = 0.7f)
+                        )
+                    }
+                }
+            )
         }
     }
 }
