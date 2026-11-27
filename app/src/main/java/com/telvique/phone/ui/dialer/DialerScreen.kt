@@ -72,8 +72,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asComposeRenderEffect
 import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.layer.drawLayer
-import androidx.compose.ui.graphics.layer.rememberGraphicsLayer
+import androidx.compose.ui.graphics.rememberGraphicsLayer
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -653,7 +653,7 @@ fun DialerScreen(
                             }
                     ) {
                         Canvas(modifier = Modifier.matchParentSize()) {
-                            if (listGraphicsLayer.size.width > 0 && listGraphicsLayer.size.height > 0) {
+                            if (listGraphicsLayer.size != IntSize.Zero) {
                                 translate(left = 0f, top = -glassTopInRootPx) {
                                     drawLayer(listGraphicsLayer)
                                 }
