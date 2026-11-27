@@ -1943,47 +1943,49 @@ private fun AppleSlideToAnswerPill(
                             triggerAnswer()
                         }
                         .pointerInput(maxDragPx, isAnswerTriggered, isDeclineTriggered, callPhase) {
-                            if (isAnswerTriggered || isDeclineTriggered || callPhase != CallPhase.RINGING) return@pointerInput
-                            detectHorizontalDragGestures(
-                                onDragStart = { /* started dragging */ },
-                                onDragEnd = {
-                                    if (isAnswerTriggered || isDeclineTriggered || callPhase != CallPhase.RINGING) return@onDragEnd
-                                    if (offsetX.value >= completionThreshold) {
-                                        triggerAnswer()
-                                    } else {
-                                        scope.launch {
-                                            offsetX.animateTo(
-                                                targetValue = 0f,
-                                                animationSpec = spring(
-                                                    dampingRatio = Spring.DampingRatioLowBouncy,
-                                                    stiffness = Spring.StiffnessMediumLow
+                            if (!isAnswerTriggered && !isDeclineTriggered && callPhase == CallPhase.RINGING) {
+                                detectHorizontalDragGestures(
+                                    onDragStart = { /* started dragging */ },
+                                    onDragEnd = {
+                                        if (!isAnswerTriggered && !isDeclineTriggered && callPhase == CallPhase.RINGING) {
+                                            if (offsetX.value >= completionThreshold) {
+                                                triggerAnswer()
+                                            } else {
+                                                scope.launch {
+                                                    offsetX.animateTo(
+                                                        targetValue = 0f,
+                                                        animationSpec = spring(
+                                                            dampingRatio = Spring.DampingRatioLowBouncy,
+                                                            stiffness = Spring.StiffnessMediumLow
+                                                        )
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    },
+                                    onDragCancel = {
+                                        if (!isAnswerTriggered) {
+                                            scope.launch {
+                                                offsetX.animateTo(
+                                                    targetValue = 0f,
+                                                    animationSpec = spring(
+                                                        dampingRatio = Spring.DampingRatioLowBouncy,
+                                                        stiffness = Spring.StiffnessMediumLow
+                                                    )
                                                 )
-                                            )
+                                            }
                                         }
                                     }
-                                },
-                                onDragCancel = {
-                                    if (!isAnswerTriggered) {
+                                ) { change, dragAmount ->
+                                    if (!isAnswerTriggered && !isDeclineTriggered && callPhase == CallPhase.RINGING) {
+                                        change.consume()
+                                        val targetOffset = (offsetX.value + dragAmount).coerceIn(0f, maxDragPx)
                                         scope.launch {
-                                            offsetX.animateTo(
-                                                targetValue = 0f,
-                                                animationSpec = spring(
-                                                    dampingRatio = Spring.DampingRatioLowBouncy,
-                                                    stiffness = Spring.StiffnessMediumLow
-                                                )
-                                            )
+                                            offsetX.snapTo(targetOffset)
                                         }
-                                    }
-                                }
-                            ) { change, dragAmount ->
-                                if (!isAnswerTriggered && !isDeclineTriggered && callPhase == CallPhase.RINGING) {
-                                    change.consume()
-                                    val targetOffset = (offsetX.value + dragAmount).coerceIn(0f, maxDragPx)
-                                    scope.launch {
-                                        offsetX.snapTo(targetOffset)
-                                    }
-                                    if (targetOffset >= maxDragPx) {
-                                        triggerAnswer()
+                                        if (targetOffset >= maxDragPx) {
+                                            triggerAnswer()
+                                        }
                                     }
                                 }
                             }
