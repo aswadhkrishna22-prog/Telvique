@@ -57,7 +57,11 @@ import androidx.compose.ui.AbsoluteAlignment
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -275,6 +279,7 @@ fun LiquidPhoneTabBar(
                         isDark = isDark,
                         blurRadius = 24.dp,
                         tintAlpha = if (isDark) 0.52f else 0.78f,
+                        showBorder = false,
                         shadowElevation = 0.dp,
                     ),
             )
@@ -357,10 +362,25 @@ fun LiquidPhoneTabBar(
                         .fillMaxHeight()
                         .clip(LensShape)
                         .background(
-                            if (isDark) Color.White.copy(alpha = 0.14f) else Color.Black.copy(alpha = 0.07f),
+                            if (isDark) Color.White.copy(alpha = 0.12f) else Color.Black.copy(alpha = 0.06f),
                             LensShape,
                         )
-                        .liquidBubbleHighlight(isDark) { 0.35f + 0.65f * lift },
+                        .drawBehind {
+                            val w = size.width
+                            val h = size.height
+                            val rimGlowAlpha = if (isDark) 0.10f else 0.20f
+                            drawRoundRect(
+                                brush = Brush.linearGradient(
+                                    0.00f to Color.White.copy(alpha = rimGlowAlpha),
+                                    0.30f to Color.White.copy(alpha = rimGlowAlpha * 0.35f),
+                                    0.60f to Color.Transparent,
+                                    1.00f to Color.Transparent,
+                                    start = Offset(0f, 0f),
+                                    end = Offset(w * 0.65f, h * 0.65f)
+                                ),
+                                cornerRadius = CornerRadius(h / 2f)
+                            )
+                        },
                 )
             }
 
@@ -397,7 +417,22 @@ fun LiquidPhoneTabBar(
                             ambientShadowColor = Color.Black.copy(alpha = 0.08f)
                             spotShadowColor = Color.Black.copy(alpha = 0.16f)
                         }
-                        .liquidBubbleHighlight(isDark) { 0.25f + 0.75f * lift.coerceIn(0f, 1f) }
+                        .drawBehind {
+                            val w = size.width
+                            val h = size.height
+                            val rimGlowAlpha = if (isDark) 0.10f else 0.20f
+                            drawRoundRect(
+                                brush = Brush.linearGradient(
+                                    0.00f to Color.White.copy(alpha = rimGlowAlpha),
+                                    0.30f to Color.White.copy(alpha = rimGlowAlpha * 0.35f),
+                                    0.60f to Color.Transparent,
+                                    1.00f to Color.Transparent,
+                                    start = Offset(0f, 0f),
+                                    end = Offset(w * 0.65f, h * 0.65f)
+                                ),
+                                cornerRadius = CornerRadius(h / 2f)
+                            )
+                        }
                         .liquid(railState) {
                             val amount = lift.coerceIn(0f, 1f)
                             shape = LensShape
@@ -442,7 +477,7 @@ fun LiquidCircularGlassButton(
 
     val glassModifier = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && liquidState != null) {
         Modifier
-            .shadow(6.dp, CircleShape, clip = false, ambientColor = Color.Black.copy(alpha = 0.08f))
+            .shadow(4.dp, CircleShape, clip = false, ambientColor = Color.Black.copy(alpha = 0.08f))
             .background(palette.cardSurface, CircleShape)
             .liquid(liquidState) {
                 shape = CircleShape
@@ -454,14 +489,14 @@ fun LiquidCircularGlassButton(
                 dispersion = 0f
                 this.tint = surfaceTint
             }
-            .liquidBubbleHighlight(isDark = isDark, cornerFraction = 0.5f)
     } else {
         Modifier.clearLiquidGlassPill(
             shape = CircleShape,
             hazeState = null,
             isDark = isDark,
             blurRadius = 8.dp,
-            shadowElevation = 4.dp,
+            showBorder = false,
+            shadowElevation = 2.dp,
         )
     }
 
@@ -474,6 +509,21 @@ fun LiquidCircularGlassButton(
             }
             .then(glassModifier)
             .clip(CircleShape)
+            .drawBehind {
+                val w = size.width
+                val h = size.height
+                val rimGlowAlpha = if (isDark) 0.10f else 0.20f
+                drawCircle(
+                    brush = Brush.linearGradient(
+                        0.00f to Color.White.copy(alpha = rimGlowAlpha),
+                        0.30f to Color.White.copy(alpha = rimGlowAlpha * 0.35f),
+                        0.60f to Color.Transparent,
+                        1.00f to Color.Transparent,
+                        start = Offset(0f, 0f),
+                        end = Offset(w * 0.65f, h * 0.65f)
+                    )
+                )
+            }
             .clickable(
                 interactionSource = interactionSource,
                 indication = null,
