@@ -239,22 +239,27 @@ private const val KEYPAD_LIQUID_GLASS_SHADER_SRC = """
             return bgSample;
         }
 
-        // 2. Inside key: Liquid Glass Lens Refraction (rim-only bending) & Chromatic Dispersion
+        // 2. Inside key: Full convex optical lens (centre magnification + rim bending)
         float r = closestDist;
         float R = uKeyRadius;
         float rNorm = clamp(r / R, 0.0, 1.0);
         float2 dir = (r > 0.001) ? ((p - closestCenter) / r) : float2(0.0, 0.0);
 
-        // Rim-only bending of the blurred backdrop (no center distortion/magnification)
-        float rimFactor = smoothstep(0.55, 1.0, rNorm);
-        float rimBend = uRefraction * 0.35 * rimFactor;
-        float totalOffset = -rimBend * R;
-        float2 pRefract = p + dir * totalOffset;
+        // Dome profile: f(t) = sqrt(1 - t^2) gives genuine spherical curvature
+        float domeZ     = sqrt(max(0.0, 1.0 - rNorm * rNorm));          // 1 at centre, 0 at rim
+        float domeTaper = 1.0 - domeZ;                                   // 0 at centre, 1 at rim
+        // Centre magnification: pixels inward toward the centre, fading toward rim
+        float magStrength   = uRefraction * 0.52 * domeZ * domeZ;
+        float2 pMag         = p - dir * (magStrength * R);
+        // Rim bending: Snell's-law gradient bending outward at the glass edge
+        float rimFactor     = smoothstep(0.55, 1.0, rNorm);
+        float rimBend       = uRefraction * 0.28 * rimFactor;
+        float2 pRefract     = pMag + dir * (rimBend * R);
 
-        // Dispersion strictly at the rim at low strength
-        float disp = uDispersion * pow(rNorm, 4.0) * R;
+        // Chromatic dispersion: separate R/G/B sample points; stronger at rim
+        float disp  = uDispersion * pow(rNorm, 3.5) * R;
         float2 coordR = clamp(pRefract - dir * disp, float2(0.0), uSize - float2(1.0));
-        float2 coordG = clamp(pRefract, float2(0.0), uSize - float2(1.0));
+        float2 coordG = clamp(pRefract,              float2(0.0), uSize - float2(1.0));
         float2 coordB = clamp(pRefract + dir * disp, float2(0.0), uSize - float2(1.0));
 
         half rChannel = content.eval(coordR).r;
@@ -265,16 +270,20 @@ private const val KEYPAD_LIQUID_GLASS_SHADER_SRC = """
         half3 keyRefract = keyBase.rgb;
         aChannel = keyBase.a;
 
-        // 3. Thin soft rim sheen along top-left (dim gradient, no center spot)
+        // 3. Specular lighting: directional top-left rim + convex dome hotspot
         float angleToLight = dot(dir, float2(-0.7071, -0.7071));
-        float rimSheen = max(0.0, angleToLight) * pow(rNorm, 3.0) * 0.35;
-        float totalSpec = rimSheen * uSpecular;
+        // Rim sheen fades from rim to centre
+        float rimSheen   = max(0.0, angleToLight) * pow(rNorm, 2.5) * 0.30;
+        // Dome highlight: a Phong-style specular at the top-left of the dome
+        float domeSpec   = pow(max(0.0, dot(float2(-0.7071, -0.7071) - dir * domeZ, float2(0.0, -1.0))), 6.0)
+                           * domeZ * 0.18;
+        float totalSpec  = (rimSheen + domeSpec) * uSpecular;
 
-        // Crisp thin glass edge (brighter toward the light) + soft top glow inside each key
-        float ring = smoothstep(-2.5, -0.8, minSdf) * (1.0 - smoothstep(-0.8, 0.6, minSdf));
-        totalSpec += ring * (0.08 + 0.28 * max(0.0, angleToLight)) * uFrost;
-        float vy = (p.y - closestCenter.y) / R;
-        totalSpec += 0.04 * clamp(-vy, 0.0, 1.0) * (1.0 - 0.5 * rNorm) * uFrost;
+        // Crisp thin glass edge (brighter toward the light) + soft top inner glow
+        float ring  = smoothstep(-2.5, -0.8, minSdf) * (1.0 - smoothstep(-0.8, 0.6, minSdf));
+        totalSpec  += ring * (0.10 + 0.32 * max(0.0, angleToLight)) * uFrost;
+        float vy    = (p.y - closestCenter.y) / R;
+        totalSpec  += 0.05 * clamp(-vy, 0.0, 1.0) * (1.0 - 0.55 * rNorm) * uFrost;
 
         // 4. Flat base glass tint (translucent white 13-16%)
         half3 baseKeyTint = half3(1.0, 1.0, 1.0);
@@ -1780,32 +1789,28 @@ private fun AppleLiquidDialKey(
                 scaleY = scale
             }
             .clip(CircleShape)
-            .drawBehind {
-                val w = size.width
-                val h = size.height
-
-                // 1. Translucent fill with flat / subtle top-to-bottom change (6-9% white alpha in dark mode)
-                drawCircle(
-                    brush = Brush.verticalGradient(
-                        colors = listOf(topFill, bottomFill),
-                        startY = 0f,
-                        endY = h
-                    )
-                )
-
-                // 2. Thin soft rim highlight along top-left edge as a dim gradient (no bulky center sphere spot, no stroke)
-                val rimAlpha = (if (palette.isDark) KEYPAD_SPECULAR_STRENGTH else 0.30f) + 0.06f * pressProgress
-                drawCircle(
-                    brush = Brush.linearGradient(
-                        colors = listOf(
-                            Color.White.copy(alpha = rimAlpha),
-                            Color.White.copy(alpha = rimAlpha * 0.25f),
-                            Color.Transparent
-                        ),
-                        start = Offset(0f, 0f),
-                        end = Offset(w * 0.70f, h * 0.70f)
-                    )
-                )
+            .then(
+                // When the AGSL panel shader is NOT active (older API / fallback), draw the
+                // translucent fill ourselves so the key has a visible glass body.
+                // When the panel shader IS active it draws the key fill+refraction itself.
+                if (!isLiquidShaderActive) {
+                    Modifier.drawBehind {
+                        val w = size.width
+                        val h = size.height
+                        drawCircle(
+                            brush = Brush.verticalGradient(
+                                colors = listOf(topFill, bottomFill),
+                                startY = 0f,
+                                endY = h
+                            )
+                        )
+                    }
+                } else Modifier
+            )
+            // Rim highlight (liquidBubbleHighlight) on top of whatever the shader drew.
+            // intensity: 0.35 at rest → up to 1.0 when pressed
+            .liquidBubbleHighlight(isDark = palette.isDark, cornerFraction = 0.5f) {
+                0.35f + 0.65f * pressProgress
             }
             .combinedClickable(
                 interactionSource = interactionSource,
