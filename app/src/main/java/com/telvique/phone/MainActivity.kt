@@ -64,6 +64,7 @@ import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -271,7 +272,14 @@ private fun TelviqueMainRoot(
     val appBackground = palette.background
     val isLowRam = remember(context) {
         val am = runCatching { context.getSystemService(ActivityManager::class.java) }.getOrNull()
-        am?.isLowRamDevice == true
+        if (am == null || am.isLowRamDevice) {
+            true
+        } else {
+            val memInfo = ActivityManager.MemoryInfo()
+            am.getMemoryInfo(memInfo)
+            val totalMemGb = memInfo.totalMem.toDouble() / (1024.0 * 1024.0 * 1024.0)
+            totalMemGb < 3.0
+        }
     }
     val useLiquidNav = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !isLowRam
     val navLiquidState = if (useLiquidNav) rememberLiquidState() else null
@@ -568,20 +576,22 @@ private fun TelviqueMainRoot(
                 },
                 label = "FloatingPhoneTabBarVisibility",
             )
-            val baseScale = lerp(0.88f, 1.0f, animatedVisibilityFactor)
-            val hideOffsetY = with(LocalDensity.current) { 90.dp.toPx() } * (1f - animatedVisibilityFactor)
+            val hideDistancePx = with(LocalDensity.current) { 90.dp.toPx() }
 
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .fillMaxWidth()
+                    .then(if (!isBarVisible) Modifier.clearAndSetSemantics { } else Modifier)
                     .navigationBarsPadding()
                     .padding(horizontal = 16.dp, vertical = 12.dp)
                     .graphicsLayer {
-                        translationY = hideOffsetY
-                        scaleX = baseScale
-                        scaleY = baseScale
-                        alpha = animatedVisibilityFactor
+                        val factor = animatedVisibilityFactor
+                        translationY = hideDistancePx * (1f - factor)
+                        val scale = lerp(0.88f, 1.0f, factor)
+                        scaleX = scale
+                        scaleY = scale
+                        alpha = factor
                     },
             ) {
                 Row(
